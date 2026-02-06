@@ -1,0 +1,82 @@
+name: 'Setup Node.js Environment'
+description: 'Standardized Node.js setup with pnpm and caching'
+
+inputs:
+  node-version:
+    description: 'Node.js version'
+    required: false
+    default: '22'
+  package-manager:
+    description: 'Package manager to use: npm, pnpm, yarn, or bun'
+    required: false
+    default: 'pnpm'
+  pnpm-version:
+    description: 'pnpm version (only used if package-manager is pnpm)'
+    required: false
+    default: 'latest'
+  cache:
+    description: 'Whether to cache dependencies'
+    required: false
+    default: 'true'
+  working-directory:
+    description: 'Working directory for dependency installation'
+    required: false
+    default: '.'
+  install-just:
+    description: 'Whether to install just task runner'
+    required: false
+    default: 'true'
+  run-install:
+    description: 'Whether to run package install'
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    - name: Setup just
+      if: inputs.install-just == 'true'
+      uses: extractions/setup-just@v2
+
+    - name: Setup pnpm
+      if: inputs.package-manager == 'pnpm'
+      uses: pnpm/action-setup@v4
+      with:
+        version: ${{ inputs.pnpm-version }}
+
+    - name: Setup Bun
+      if: inputs.package-manager == 'bun'
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: latest
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: ${{ inputs.cache == 'true' && inputs.package-manager || '' }}
+        cache-dependency-path: ${{ inputs.working-directory }}/pnpm-lock.yaml
+
+    - name: Install dependencies (pnpm)
+      if: inputs.run-install == 'true' && inputs.package-manager == 'pnpm'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: pnpm install --frozen-lockfile
+
+    - name: Install dependencies (npm)
+      if: inputs.run-install == 'true' && inputs.package-manager == 'npm'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: npm ci
+
+    - name: Install dependencies (yarn)
+      if: inputs.run-install == 'true' && inputs.package-manager == 'yarn'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: yarn install --frozen-lockfile
+
+    - name: Install dependencies (bun)
+      if: inputs.run-install == 'true' && inputs.package-manager == 'bun'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: bun install --frozen-lockfile

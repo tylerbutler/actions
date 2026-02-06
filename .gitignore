@@ -1,0 +1,11 @@
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node (if testing locally)
+node_modules/

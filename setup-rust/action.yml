@@ -1,0 +1,58 @@
+name: 'Setup Rust Environment'
+description: 'Standardized Rust toolchain setup with caching'
+
+inputs:
+  toolchain:
+    description: 'Rust toolchain version'
+    required: false
+    default: 'stable'
+  components:
+    description: 'Rust components to install (comma-separated, e.g., rustfmt,clippy)'
+    required: false
+    default: ''
+  targets:
+    description: 'Additional compilation targets (comma-separated)'
+    required: false
+    default: ''
+  cache:
+    description: 'Whether to cache Rust artifacts'
+    required: false
+    default: 'true'
+  cache-key:
+    description: 'Custom cache key prefix'
+    required: false
+    default: 'rust'
+  cache-targets:
+    description: 'Whether to cache target directories'
+    required: false
+    default: 'true'
+  cache-on-failure:
+    description: 'Cache even when workflow fails'
+    required: false
+    default: 'true'
+  install-just:
+    description: 'Whether to install just task runner'
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    - name: Setup just
+      if: inputs.install-just == 'true'
+      uses: extractions/setup-just@v2
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: ${{ inputs.toolchain }}
+        components: ${{ inputs.components }}
+        targets: ${{ inputs.targets }}
+
+    - name: Setup Rust Cache
+      if: inputs.cache == 'true'
+      uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: "${{ inputs.cache-key }}-${{ runner.os }}-${{ inputs.toolchain }}"
+        cache-targets: ${{ inputs.cache-targets }}
+        cache-on-failure: ${{ inputs.cache-on-failure }}

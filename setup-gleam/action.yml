@@ -1,0 +1,94 @@
+name: 'Setup Gleam Environment'
+description: 'Standardized Gleam/BEAM setup with caching and optional Node.js'
+
+inputs:
+  erlang-version:
+    description: 'Erlang/OTP version (ignored if version-file is set)'
+    required: false
+    default: ''
+  gleam-version:
+    description: 'Gleam version (ignored if version-file is set)'
+    required: false
+    default: ''
+  version-file:
+    description: 'Path to .tool-versions file for version management'
+    required: false
+    default: '.tool-versions'
+  version-type:
+    description: 'Version matching type: strict or loose'
+    required: false
+    default: 'strict'
+  node:
+    description: 'Whether to setup Node.js for JavaScript target'
+    required: false
+    default: 'false'
+  node-version:
+    description: 'Node.js version to install'
+    required: false
+    default: '22'
+  cache:
+    description: 'Whether to cache Gleam dependencies'
+    required: false
+    default: 'true'
+  working-directory:
+    description: 'Working directory for dependency download'
+    required: false
+    default: '.'
+  install-just:
+    description: 'Whether to install just task runner'
+    required: false
+    default: 'true'
+  run-deps:
+    description: 'Whether to run gleam deps download (or just deps if justfile exists)'
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    - name: Setup just
+      if: inputs.install-just == 'true'
+      uses: extractions/setup-just@v2
+
+    - name: Setup BEAM (from version file)
+      if: inputs.version-file != '' && inputs.erlang-version == ''
+      uses: erlef/setup-beam@v1
+      with:
+        version-file: ${{ inputs.version-file }}
+        version-type: ${{ inputs.version-type }}
+
+    - name: Setup BEAM (explicit versions)
+      if: inputs.erlang-version != ''
+      uses: erlef/setup-beam@v1
+      with:
+        otp-version: ${{ inputs.erlang-version }}
+        gleam-version: ${{ inputs.gleam-version }}
+
+    - name: Setup Node.js
+      if: inputs.node == 'true'
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Cache Gleam dependencies
+      if: inputs.cache == 'true'
+      uses: actions/cache@v4
+      with:
+        path: |
+          ${{ inputs.working-directory }}/build/packages
+          ~/.cache/gleam
+        key: gleam-${{ runner.os }}-${{ hashFiles(format('{0}/gleam.toml', inputs.working-directory), format('{0}/manifest.toml', inputs.working-directory)) }}
+        restore-keys: |
+          gleam-${{ runner.os }}-
+
+    - name: Download dependencies (just)
+      if: inputs.run-deps == 'true' && hashFiles(format('{0}/justfile', inputs.working-directory)) != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: just deps
+
+    - name: Download dependencies (gleam)
+      if: inputs.run-deps == 'true' && hashFiles(format('{0}/justfile', inputs.working-directory)) == ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: gleam deps download
