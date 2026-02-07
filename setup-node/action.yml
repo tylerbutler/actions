@@ -34,28 +34,29 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Setup just
+    - name: Install just
       if: inputs.install-just == 'true'
-      uses: extractions/setup-just@v2
+      uses: taiki-e/install-action@4573997e3b6c0fbc22f7acab193b00a8a3ca817d # ratchet:taiki-e/install-action@v2
+      with:
+        tool: just
 
     - name: Setup pnpm
       if: inputs.package-manager == 'pnpm'
-      uses: pnpm/action-setup@v4
+      uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # ratchet:pnpm/action-setup@v4
       with:
         version: ${{ inputs.pnpm-version }}
 
     - name: Setup Bun
       if: inputs.package-manager == 'bun'
-      uses: oven-sh/setup-bun@v2
+      uses: oven-sh/setup-bun@3d267786b128fe76c2f16a390aa2448b815359f3 # ratchet:oven-sh/setup-bun@v2
       with:
         bun-version: latest
 
     - name: Setup Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # ratchet:actions/setup-node@v4
       with:
         node-version: ${{ inputs.node-version }}
         cache: ${{ inputs.cache == 'true' && inputs.package-manager || '' }}
-        cache-dependency-path: ${{ inputs.working-directory }}/pnpm-lock.yaml
 
     - name: Install dependencies (pnpm)
       if: inputs.run-install == 'true' && inputs.package-manager == 'pnpm'

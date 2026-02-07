@@ -4,13 +4,13 @@ description: 'Install common development tools via taiki-e/install-action'
 inputs:
   tools:
     description: 'Comma-separated list of tools to install (e.g., just,cargo-nextest)'
-    required: true
+    required: false
     default: 'just'
 
 runs:
   using: composite
   steps:
     - name: Install Tools
-      uses: taiki-e/install-action@v2
+      uses: taiki-e/install-action@4573997e3b6c0fbc22f7acab193b00a8a3ca817d # ratchet:taiki-e/install-action@v2
       with:
         tool: ${{ inputs.tools }}
