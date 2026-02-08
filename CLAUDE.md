@@ -12,6 +12,7 @@ Reusable composite actions for CI/CD workflows. Used across multiple repositorie
 | `setup-rust` | Rust toolchain with caching |
 | `setup-node` | Node.js with pnpm/npm/yarn/bun |
 | `install-tools` | Install dev tools via taiki-e |
+| `changie-release` | Batch changie entries and create release PR |
 
 ## Usage Pattern
 
@@ -34,6 +35,8 @@ actions/
 │   └── action.yml      # Node.js setup
 ├── install-tools/
 │   └── action.yml      # Generic tool installer
+├── changie-release/
+│   └── action.yml      # Changie release PR automation
 ├── README.md           # User documentation
 └── LICENSE
 ```

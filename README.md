@@ -130,6 +130,70 @@ Install development tools via [taiki-e/install-action](https://github.com/taiki-
 
 **Supported tools:** See [taiki-e/install-action](https://github.com/taiki-e/install-action#supported-tools)
 
+### changie-release
+
+Batch [changie](https://changie.dev/) changelog entries and create a release pull request. Useful for automating releases in projects that use changie for changelog management.
+
+```yaml
+- uses: tylerbutler/actions/changie-release@v1
+```
+
+**Inputs:**
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `version` | `auto` | Version to batch: auto, major, minor, patch, or explicit semver |
+| `changie-version` | `latest` | Changie CLI version to install |
+| `working-directory` | `.` | Directory containing `.changie.yaml` |
+| `skip-if-no-changes` | `true` | Skip gracefully when no unreleased fragments exist |
+| `pr-title-template` | `Release {version}` | PR title (`{version}` replaced at runtime) |
+| `branch-template` | `release/{version}` | Branch name template |
+| `commit-message-template` | `chore(release): {version}` | Commit message template |
+| `pr-body` | *(default text)* | Pull request body text |
+| `labels` | `release` | Comma-separated PR labels |
+| `draft` | `false` | Create as draft PR |
+| `token` | `${{ github.token }}` | GitHub token for PR creation |
+| `base` | *(checked-out branch)* | Base branch for the PR |
+| `delete-branch` | `true` | Delete branch after merge |
+
+**Outputs:**
+
+| Output | Description |
+|--------|-------------|
+| `version` | Resolved release version |
+| `pr-number` | Pull request number |
+| `pr-url` | Pull request URL |
+| `pr-operation` | Operation performed: created, updated, closed, or noop |
+| `skipped` | Whether the action was skipped (no unreleased changes) |
+
+**Example:**
+
+```yaml
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: tylerbutler/actions/changie-release@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+**Example with custom templates:**
+
+```yaml
+- uses: tylerbutler/actions/changie-release@v1
+  with:
+    version: minor
+    pr-title-template: 'chore: release {version}'
+    branch-template: 'chore/release-{version}'
+    labels: 'release,automated'
+    draft: 'true'
+```
+
 ## Versioning
 
 Use semantic versioning tags:
