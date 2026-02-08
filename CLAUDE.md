@@ -9,6 +9,7 @@ Reusable composite actions for CI/CD workflows. Used across multiple repositorie
 | Action | Purpose |
 |--------|---------|
 | `setup-gleam` | Gleam/BEAM environment with caching |
+| `setup-go` | Go environment with optional mise tool management |
 | `setup-rust` | Rust toolchain with caching |
 | `setup-node` | Node.js with pnpm/npm/yarn/bun |
 | `install-tools` | Install dev tools via taiki-e |
@@ -30,6 +31,8 @@ From any repository:
 actions/
 ├── setup-gleam/
 │   └── action.yml      # Gleam/BEAM setup
+├── setup-go/
+│   └── action.yml      # Go setup with optional mise
 ├── setup-rust/
 │   └── action.yml      # Rust toolchain setup
 ├── setup-node/

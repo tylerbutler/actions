@@ -1,0 +1,68 @@
+name: 'Setup Go Environment'
+description: 'Standardized Go setup with caching and optional mise tool management'
+
+inputs:
+  go-version:
+    description: 'Go version (ignored if go-version-file is set)'
+    required: false
+    default: ''
+  go-version-file:
+    description: 'Path to go.mod or file containing Go version'
+    required: false
+    default: 'go.mod'
+  cache:
+    description: 'Whether to cache Go modules'
+    required: false
+    default: 'true'
+  working-directory:
+    description: 'Working directory for dependency download'
+    required: false
+    default: '.'
+  install-just:
+    description: 'Whether to install just task runner'
+    required: false
+    default: 'true'
+  install-mise:
+    description: 'Whether to install mise and run mise install for project tools'
+    required: false
+    default: 'false'
+  run-deps:
+    description: 'Whether to run go mod download'
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    - name: Install just
+      if: inputs.install-just == 'true'
+      uses: taiki-e/install-action@4573997e3b6c0fbc22f7acab193b00a8a3ca817d # ratchet:taiki-e/install-action@v2
+      with:
+        tool: just
+
+    - name: Setup Go (from version file)
+      if: inputs.go-version == ''
+      uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # ratchet:actions/setup-go@v6
+      with:
+        go-version-file: ${{ inputs.go-version-file }}
+        cache: ${{ inputs.cache == 'true' }}
+
+    - name: Setup Go (explicit version)
+      if: inputs.go-version != ''
+      uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # ratchet:actions/setup-go@v6
+      with:
+        go-version: ${{ inputs.go-version }}
+        cache: ${{ inputs.cache == 'true' }}
+
+    - name: Install mise and tools
+      if: inputs.install-mise == 'true'
+      uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # ratchet:jdx/mise-action@v2
+      with:
+        experimental: true
+        working_directory: ${{ inputs.working-directory }}
+
+    - name: Download dependencies
+      if: inputs.run-deps == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: go mod download

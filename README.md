@@ -112,6 +112,54 @@ jobs:
       - run: pnpm test
 ```
 
+### setup-go
+
+Setup Go environment with caching and optional [mise](https://mise.jdx.dev/) tool management.
+
+```yaml
+- uses: tylerbutler/actions/setup-go@v1
+  with:
+    install-mise: 'true'  # Install tools from mise.toml
+```
+
+**Inputs:**
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `go-version` | `''` | Go version (ignored if go-version-file set) |
+| `go-version-file` | `go.mod` | Path to go.mod or version file |
+| `cache` | `true` | Cache Go modules |
+| `working-directory` | `.` | Working directory |
+| `install-just` | `true` | Install just task runner |
+| `install-mise` | `false` | Install mise and run mise install for project tools |
+| `run-deps` | `true` | Run go mod download |
+
+**Example:**
+
+```yaml
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: tylerbutler/actions/setup-go@v1
+      - run: just test
+```
+
+**Example with mise (installs tools from mise.toml):**
+
+```yaml
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: tylerbutler/actions/setup-go@v1
+        with:
+          install-mise: 'true'
+      - run: just ci
+```
+
 ### install-tools
 
 Install development tools via [taiki-e/install-action](https://github.com/taiki-e/install-action).
