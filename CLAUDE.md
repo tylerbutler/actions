@@ -13,6 +13,7 @@ Reusable composite actions for CI/CD workflows. Used across multiple repositorie
 | `setup-node` | Node.js with pnpm/npm/yarn/bun |
 | `install-tools` | Install dev tools via taiki-e |
 | `changie-release` | Batch changie entries and create release PR |
+| `changie-auto-tag` | Create version tag from latest changie release |
 
 ## Usage Pattern
 
@@ -37,6 +38,8 @@ actions/
 │   └── action.yml      # Generic tool installer
 ├── changie-release/
 │   └── action.yml      # Changie release PR automation
+├── changie-auto-tag/
+│   └── action.yml      # Version tag from changie
 ├── README.md           # User documentation
 └── LICENSE
 ```

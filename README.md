@@ -194,6 +194,49 @@ jobs:
     draft: 'true'
 ```
 
+### changie-auto-tag
+
+Create a version tag from the latest [changie](https://changie.dev/) release. Designed to run when a release PR merges, triggering downstream tag-based workflows (e.g., GoReleaser).
+
+```yaml
+- uses: tylerbutler/actions/changie-auto-tag@v1
+```
+
+**Inputs:**
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `changie-version` | `latest` | Changie CLI version to install |
+| `working-directory` | `.` | Directory containing `.changie.yaml` |
+| `tag-prefix` | `v` | Prefix for the git tag |
+| `token` | `${{ github.token }}` | GitHub token for pushing the tag |
+
+**Outputs:**
+
+| Output | Description |
+|--------|-------------|
+| `version` | Version from `changie latest` |
+| `tag` | Full tag that was created (e.g., `v1.2.3`) |
+
+**Example (auto-tag on release PR merge):**
+
+```yaml
+name: Auto-tag release
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  tag:
+    if: github.event.pull_request.merged && contains(github.event.pull_request.labels.*.name, 'release')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: tylerbutler/actions/changie-auto-tag@v1
+```
+
 ## Versioning
 
 Use semantic versioning tags:
