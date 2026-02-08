@@ -1,0 +1,145 @@
+name: 'Changie Release PR'
+description: 'Batch changie changelog entries and create a release pull request'
+
+inputs:
+  version:
+    description: 'Version to batch: auto, major, minor, patch, or explicit semver'
+    required: false
+    default: 'auto'
+  changie-version:
+    description: 'Changie CLI version to install'
+    required: false
+    default: 'latest'
+  working-directory:
+    description: 'Directory containing .changie.yaml'
+    required: false
+    default: '.'
+  skip-if-no-changes:
+    description: 'Skip gracefully when no unreleased change fragments exist'
+    required: false
+    default: 'true'
+  pr-title-template:
+    description: 'PR title template ({version} is replaced with resolved version)'
+    required: false
+    default: 'Release {version}'
+  branch-template:
+    description: 'Branch name template ({version} is replaced with resolved version)'
+    required: false
+    default: 'release/{version}'
+  commit-message-template:
+    description: 'Commit message template ({version} is replaced with resolved version)'
+    required: false
+    default: 'chore(release): {version}'
+  pr-body:
+    description: 'Pull request body text'
+    required: false
+    default: 'Automated release PR created by changie-release action.'
+  labels:
+    description: 'Comma-separated labels for the pull request'
+    required: false
+    default: 'release'
+  draft:
+    description: 'Create the pull request as a draft'
+    required: false
+    default: 'false'
+  token:
+    description: 'GitHub token for PR creation. Use a PAT or GitHub App token to trigger workflows on the created PR.'
+    required: false
+    default: ${{ github.token }}
+  base:
+    description: 'Base branch for the pull request (defaults to the checked-out branch)'
+    required: false
+    default: ''
+  delete-branch:
+    description: 'Delete the release branch after the PR is merged'
+    required: false
+    default: 'true'
+
+outputs:
+  version:
+    description: 'The resolved release version'
+    value: ${{ steps.version.outputs.version }}
+  pr-number:
+    description: 'The pull request number'
+    value: ${{ steps.create-pr.outputs.pull-request-number }}
+  pr-url:
+    description: 'The pull request URL'
+    value: ${{ steps.create-pr.outputs.pull-request-url }}
+  pr-operation:
+    description: 'The pull request operation performed (created, updated, closed, or noop)'
+    value: ${{ steps.create-pr.outputs.pull-request-operation }}
+  skipped:
+    description: 'Whether the action was skipped due to no unreleased changes'
+    value: ${{ steps.check-changes.outputs.skipped }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install changie
+      uses: miniscruff/changie-action@6dcc2533cac0495148ed4046c438487e4dceaa23 # ratchet:miniscruff/changie-action@v2.0.0
+      with:
+        version: ${{ inputs.changie-version }}
+
+    - name: Batch changelog
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: changie batch ${{ inputs.version }}
+
+    - name: Check for changes
+      id: check-changes
+      shell: bash
+      run: |
+        if git diff --quiet; then
+          echo "skipped=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "skipped=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Fail if no changes
+      if: steps.check-changes.outputs.skipped == 'true' && inputs.skip-if-no-changes != 'true'
+      shell: bash
+      run: |
+        echo "::error::No unreleased change fragments found"
+        exit 1
+
+    - name: Merge changelog
+      if: steps.check-changes.outputs.skipped != 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: changie merge
+
+    - name: Get resolved version
+      if: steps.check-changes.outputs.skipped != 'true'
+      id: version
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: echo "version=$(changie latest)" >> "$GITHUB_OUTPUT"
+
+    - name: Resolve templates
+      if: steps.check-changes.outputs.skipped != 'true'
+      id: templates
+      shell: bash
+      env:
+        VERSION: ${{ steps.version.outputs.version }}
+        TITLE_TPL: ${{ inputs.pr-title-template }}
+        BRANCH_TPL: ${{ inputs.branch-template }}
+        COMMIT_TPL: ${{ inputs.commit-message-template }}
+      run: |
+        echo "pr-title=${TITLE_TPL//\{version\}/$VERSION}" >> "$GITHUB_OUTPUT"
+        echo "branch=${BRANCH_TPL//\{version\}/$VERSION}" >> "$GITHUB_OUTPUT"
+        echo "commit-message=${COMMIT_TPL//\{version\}/$VERSION}" >> "$GITHUB_OUTPUT"
+
+    - name: Create release pull request
+      if: steps.check-changes.outputs.skipped != 'true'
+      id: create-pr
+      uses: peter-evans/create-pull-request@c0f553fe549906ede9cf27b5156039d195d2ece0 # ratchet:peter-evans/create-pull-request@v8
+      with:
+        token: ${{ inputs.token }}
+        title: ${{ steps.templates.outputs.pr-title }}
+        branch: ${{ steps.templates.outputs.branch }}
+        commit-message: ${{ steps.templates.outputs.commit-message }}
+        body: ${{ inputs.pr-body }}
+        labels: ${{ inputs.labels }}
+        draft: ${{ inputs.draft }}
+        base: ${{ inputs.base }}
+        delete-branch: ${{ inputs.delete-branch }}

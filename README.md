@@ -130,6 +130,113 @@ Install development tools via [taiki-e/install-action](https://github.com/taiki-
 
 **Supported tools:** See [taiki-e/install-action](https://github.com/taiki-e/install-action#supported-tools)
 
+### changie-release
+
+Batch [changie](https://changie.dev/) changelog entries and create a release pull request. Useful for automating releases in projects that use changie for changelog management.
+
+```yaml
+- uses: tylerbutler/actions/changie-release@v1
+```
+
+**Inputs:**
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `version` | `auto` | Version to batch: auto, major, minor, patch, or explicit semver |
+| `changie-version` | `latest` | Changie CLI version to install |
+| `working-directory` | `.` | Directory containing `.changie.yaml` |
+| `skip-if-no-changes` | `true` | Skip gracefully when no unreleased fragments exist |
+| `pr-title-template` | `Release {version}` | PR title (`{version}` replaced at runtime) |
+| `branch-template` | `release/{version}` | Branch name template |
+| `commit-message-template` | `chore(release): {version}` | Commit message template |
+| `pr-body` | *(default text)* | Pull request body text |
+| `labels` | `release` | Comma-separated PR labels |
+| `draft` | `false` | Create as draft PR |
+| `token` | `${{ github.token }}` | GitHub token for PR creation |
+| `base` | *(checked-out branch)* | Base branch for the PR |
+| `delete-branch` | `true` | Delete branch after merge |
+
+**Outputs:**
+
+| Output | Description |
+|--------|-------------|
+| `version` | Resolved release version |
+| `pr-number` | Pull request number |
+| `pr-url` | Pull request URL |
+| `pr-operation` | Operation performed: created, updated, closed, or noop |
+| `skipped` | Whether the action was skipped (no unreleased changes) |
+
+**Example:**
+
+```yaml
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: tylerbutler/actions/changie-release@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+**Example with custom templates:**
+
+```yaml
+- uses: tylerbutler/actions/changie-release@v1
+  with:
+    version: minor
+    pr-title-template: 'chore: release {version}'
+    branch-template: 'chore/release-{version}'
+    labels: 'release,automated'
+    draft: 'true'
+```
+
+### changie-auto-tag
+
+Create a version tag from the latest [changie](https://changie.dev/) release. Designed to run when a release PR merges, triggering downstream tag-based workflows (e.g., GoReleaser).
+
+```yaml
+- uses: tylerbutler/actions/changie-auto-tag@v1
+```
+
+**Inputs:**
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `changie-version` | `latest` | Changie CLI version to install |
+| `working-directory` | `.` | Directory containing `.changie.yaml` |
+| `tag-prefix` | `v` | Prefix for the git tag |
+| `token` | `${{ github.token }}` | GitHub token for pushing the tag |
+
+**Outputs:**
+
+| Output | Description |
+|--------|-------------|
+| `version` | Version from `changie latest` |
+| `tag` | Full tag that was created (e.g., `v1.2.3`) |
+
+**Example (auto-tag on release PR merge):**
+
+```yaml
+name: Auto-tag release
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  tag:
+    if: github.event.pull_request.merged && contains(github.event.pull_request.labels.*.name, 'release')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: tylerbutler/actions/changie-auto-tag@v1
+```
+
 ## Versioning
 
 Use semantic versioning tags:
