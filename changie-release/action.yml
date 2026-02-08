@@ -80,43 +80,27 @@ runs:
       with:
         version: ${{ inputs.changie-version }}
 
-    - name: Check for unreleased changes
-      id: check-changes
-      shell: bash
-      working-directory: ${{ inputs.working-directory }}
-      run: |
-        # Parse changesDir and unreleasedDir from .changie.yaml
-        changes_dir=$(grep '^changesDir:' .changie.yaml | awk '{print $2}' || echo ".changes")
-        unreleased_dir=$(grep '^unreleasedDir:' .changie.yaml | awk '{print $2}' || echo "unreleased")
-        fragment_dir="${changes_dir}/${unreleased_dir}"
-
-        # Count fragment files (excluding .gitkeep)
-        if [ -d "$fragment_dir" ]; then
-          count=$(find "$fragment_dir" -type f ! -name '.gitkeep' | wc -l)
-        else
-          count=0
-        fi
-
-        echo "fragments=$count" >> "$GITHUB_OUTPUT"
-
-        if [ "$count" -eq 0 ]; then
-          if [ "${{ inputs.skip-if-no-changes }}" == "true" ]; then
-            echo "No unreleased change fragments found in $fragment_dir. Skipping."
-            echo "skipped=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::error::No unreleased change fragments found in $fragment_dir"
-            exit 1
-          fi
-        else
-          echo "Found $count unreleased change fragment(s) in $fragment_dir."
-          echo "skipped=false" >> "$GITHUB_OUTPUT"
-        fi
-
     - name: Batch changelog
-      if: steps.check-changes.outputs.skipped != 'true'
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: changie batch ${{ inputs.version }}
+
+    - name: Check for changes
+      id: check-changes
+      shell: bash
+      run: |
+        if git diff --quiet; then
+          echo "skipped=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "skipped=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Fail if no changes
+      if: steps.check-changes.outputs.skipped == 'true' && inputs.skip-if-no-changes != 'true'
+      shell: bash
+      run: |
+        echo "::error::No unreleased change fragments found"
+        exit 1
 
     - name: Merge changelog
       if: steps.check-changes.outputs.skipped != 'true'
@@ -129,27 +113,21 @@ runs:
       id: version
       shell: bash
       working-directory: ${{ inputs.working-directory }}
-      run: |
-        version=$(changie latest)
-        echo "version=$version" >> "$GITHUB_OUTPUT"
+      run: echo "version=$(changie latest)" >> "$GITHUB_OUTPUT"
 
     - name: Resolve templates
       if: steps.check-changes.outputs.skipped != 'true'
       id: templates
       shell: bash
+      env:
+        VERSION: ${{ steps.version.outputs.version }}
+        TITLE_TPL: ${{ inputs.pr-title-template }}
+        BRANCH_TPL: ${{ inputs.branch-template }}
+        COMMIT_TPL: ${{ inputs.commit-message-template }}
       run: |
-        version="${{ steps.version.outputs.version }}"
-        pr_title="${{ inputs.pr-title-template }}"
-        branch="${{ inputs.branch-template }}"
-        commit_msg="${{ inputs.commit-message-template }}"
-
-        pr_title="${pr_title//\{version\}/$version}"
-        branch="${branch//\{version\}/$version}"
-        commit_msg="${commit_msg//\{version\}/$version}"
-
-        echo "pr-title=$pr_title" >> "$GITHUB_OUTPUT"
-        echo "branch=$branch" >> "$GITHUB_OUTPUT"
-        echo "commit-message=$commit_msg" >> "$GITHUB_OUTPUT"
+        echo "pr-title=${TITLE_TPL//\{version\}/$VERSION}" >> "$GITHUB_OUTPUT"
+        echo "branch=${BRANCH_TPL//\{version\}/$VERSION}" >> "$GITHUB_OUTPUT"
+        echo "commit-message=${COMMIT_TPL//\{version\}/$VERSION}" >> "$GITHUB_OUTPUT"
 
     - name: Create release pull request
       if: steps.check-changes.outputs.skipped != 'true'
