@@ -30,10 +30,10 @@ inputs:
     description: 'Commit message template ({version} is replaced with resolved version)'
     required: false
     default: 'chore(release): {version}'
-  pr-body:
-    description: 'Pull request body text'
+  pr-body-template:
+    description: 'PR body template ({version} and {changelog} are replaced with resolved values)'
     required: false
-    default: 'Automated release PR created by changie-release action.'
+    default: '{changelog}'
   labels:
     description: 'Comma-separated labels for the pull request'
     required: false
@@ -59,6 +59,9 @@ outputs:
   version:
     description: 'The resolved release version'
     value: ${{ steps.version.outputs.version }}
+  changelog:
+    description: 'The changelog content for the released version'
+    value: ${{ steps.changelog.outputs.content }}
   pr-number:
     description: 'The pull request number'
     value: ${{ steps.create-pr.outputs.pull-request-number }}
@@ -115,6 +118,25 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       run: echo "version=$(changie latest)" >> "$GITHUB_OUTPUT"
 
+    - name: Read changelog
+      if: steps.check-changes.outputs.skipped != 'true'
+      id: changelog
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        VERSION: ${{ steps.version.outputs.version }}
+      run: |
+        CHANGES_FILE=".changes/${VERSION}.md"
+        if [ -f "$CHANGES_FILE" ]; then
+          {
+            echo "content<<EOF_CHANGELOG"
+            cat "$CHANGES_FILE"
+            echo "EOF_CHANGELOG"
+          } >> "$GITHUB_OUTPUT"
+        else
+          echo "content=" >> "$GITHUB_OUTPUT"
+        fi
+
     - name: Resolve templates
       if: steps.check-changes.outputs.skipped != 'true'
       id: templates
@@ -124,10 +146,19 @@ runs:
         TITLE_TPL: ${{ inputs.pr-title-template }}
         BRANCH_TPL: ${{ inputs.branch-template }}
         COMMIT_TPL: ${{ inputs.commit-message-template }}
+        BODY_TPL: ${{ inputs.pr-body-template }}
+        CHANGELOG: ${{ steps.changelog.outputs.content }}
       run: |
         echo "pr-title=${TITLE_TPL//\{version\}/$VERSION}" >> "$GITHUB_OUTPUT"
         echo "branch=${BRANCH_TPL//\{version\}/$VERSION}" >> "$GITHUB_OUTPUT"
         echo "commit-message=${COMMIT_TPL//\{version\}/$VERSION}" >> "$GITHUB_OUTPUT"
+        RESOLVED="${BODY_TPL//\{version\}/$VERSION}"
+        RESOLVED="${RESOLVED//\{changelog\}/$CHANGELOG}"
+        {
+          echo "pr-body<<EOF_PR_BODY"
+          echo "$RESOLVED"
+          echo "EOF_PR_BODY"
+        } >> "$GITHUB_OUTPUT"
 
     - name: Create release pull request
       if: steps.check-changes.outputs.skipped != 'true'
@@ -138,7 +169,7 @@ runs:
         title: ${{ steps.templates.outputs.pr-title }}
         branch: ${{ steps.templates.outputs.branch }}
         commit-message: ${{ steps.templates.outputs.commit-message }}
-        body: ${{ inputs.pr-body }}
+        body: ${{ steps.templates.outputs.pr-body }}
         labels: ${{ inputs.labels }}
         draft: ${{ inputs.draft }}
         base: ${{ inputs.base }}
