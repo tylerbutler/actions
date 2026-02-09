@@ -11,9 +11,9 @@ inputs:
     required: false
     default: '.'
   tag-prefix:
-    description: 'Prefix for the git tag'
+    description: 'Prefix for the git tag (changie latest already includes "v", so default is empty)'
     required: false
-    default: 'v'
+    default: ''
   token:
     description: 'GitHub token for pushing the tag'
     required: false
