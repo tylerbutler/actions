@@ -83,18 +83,23 @@ runs:
       with:
         version: ${{ inputs.changie-version }}
 
-    - name: Batch changelog
-      shell: bash
-      working-directory: ${{ inputs.working-directory }}
-      run: changie batch ${{ inputs.version }}
-
-    - name: Check for changes
+    - name: Check for unreleased changes
       id: check-changes
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: |
-        if git diff --quiet; then
+        # Read changie config to find the unreleased directory
+        CHANGES_DIR=$(grep '^changesDir:' .changie.yaml | awk '{print $2}' || echo ".changie.d")
+        UNRELEASED_DIR=$(grep '^unreleasedDir:' .changie.yaml | awk '{print $2}' || echo "unreleased")
+        UNRELEASED_PATH="${CHANGES_DIR}/${UNRELEASED_DIR}"
+
+        # Check for .yaml change fragments (exclude .gitkeep and other non-yaml files)
+        FRAGMENT_COUNT=$(find "$UNRELEASED_PATH" -maxdepth 1 -name '*.yaml' 2>/dev/null | wc -l)
+        if [ "$FRAGMENT_COUNT" -eq 0 ]; then
+          echo "No unreleased change fragments found in $UNRELEASED_PATH"
           echo "skipped=true" >> "$GITHUB_OUTPUT"
         else
+          echo "Found $FRAGMENT_COUNT unreleased change fragment(s)"
           echo "skipped=false" >> "$GITHUB_OUTPUT"
         fi
 
@@ -104,6 +109,12 @@ runs:
       run: |
         echo "::error::No unreleased change fragments found"
         exit 1
+
+    - name: Batch changelog
+      if: steps.check-changes.outputs.skipped != 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: changie batch ${{ inputs.version }}
 
     - name: Merge changelog
       if: steps.check-changes.outputs.skipped != 'true'
