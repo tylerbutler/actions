@@ -1,0 +1,53 @@
+name: Auto-tag release
+
+on:
+  workflow_call:
+    inputs:
+      changie-version:
+        description: 'Changie CLI version to install'
+        required: false
+        type: string
+        default: 'latest'
+      working-directory:
+        description: 'Directory containing .changie.yaml'
+        required: false
+        type: string
+        default: '.'
+      tag-prefix:
+        description: 'Prefix for the git tag (changie latest already includes "v", so default is empty)'
+        required: false
+        type: string
+        default: ''
+      create-release:
+        description: 'Create a GitHub Release from the tag with changie version notes'
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      version:
+        description: 'The version from changie latest'
+        value: ${{ jobs.tag.outputs.version }}
+      tag:
+        description: 'The full tag that was created'
+        value: ${{ jobs.tag.outputs.tag }}
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    if: github.event.pull_request.merged && contains(github.event.pull_request.labels.*.name, 'release')
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.auto-tag.outputs.version }}
+      tag: ${{ steps.auto-tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: tylerbutler/actions/changie-auto-tag@main
+        id: auto-tag
+        with:
+          changie-version: ${{ inputs.changie-version }}
+          working-directory: ${{ inputs.working-directory }}
+          tag-prefix: ${{ inputs.tag-prefix }}
+          create-release: ${{ inputs.create-release }}

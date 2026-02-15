@@ -203,6 +203,20 @@ Batch [changie](https://changie.dev/) changelog entries and create a release pul
 | `token` | `${{ github.token }}` | GitHub token for PR creation |
 | `base` | *(checked-out branch)* | Base branch for the PR |
 | `delete-branch` | `true` | Delete branch after merge |
+| `version-files` | `''` | TOML files to bump with the release version (see below) |
+
+**Version file bumping:**
+
+The `version-files` input accepts a newline-separated list of `path:key` pairs pointing to TOML files that should be updated with the release version (without `v` prefix). Only top-level TOML keys are supported.
+
+```yaml
+- uses: tylerbutler/actions/changie-release@main
+  with:
+    version-files: |
+      gleam.toml:version
+```
+
+This replaces `version = "..."` in `gleam.toml` with the new version. The change is included in the same commit as the changelog update — no extra git operations needed.
 
 **Outputs:**
 
@@ -256,8 +270,9 @@ Create a version tag from the latest [changie](https://changie.dev/) release. De
 |-------|---------|-------------|
 | `changie-version` | `latest` | Changie CLI version to install |
 | `working-directory` | `.` | Directory containing `.changie.yaml` |
-| `tag-prefix` | `v` | Prefix for the git tag |
+| `tag-prefix` | `''` | Prefix for the git tag (`changie latest` already includes `v`) |
 | `token` | `${{ github.token }}` | GitHub token for pushing the tag |
+| `create-release` | `false` | Create a GitHub Release with changie version notes |
 
 **Outputs:**
 
@@ -349,6 +364,41 @@ jobs:
             ## Missing Changelog Entry
             This PR has commits (`${{ steps.changelog.outputs.commit-types-found }}`) that typically require a changelog entry. Run `changie new` to add one.
 ```
+
+## Reusable Workflows
+
+### auto-tag
+
+Reusable workflow that creates a version tag when a release PR (labeled `release`) is merged. Wraps the `changie-auto-tag` composite action with the standard trigger logic, so consuming repos don't need their own workflow file.
+
+```yaml
+name: Auto-tag release
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+jobs:
+  auto-tag:
+    uses: tylerbutler/actions/.github/workflows/auto-tag.yml@main
+```
+
+**Inputs:**
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `changie-version` | `latest` | Changie CLI version to install |
+| `working-directory` | `.` | Directory containing `.changie.yaml` |
+| `tag-prefix` | `''` | Prefix for the git tag (`changie latest` already includes `v`) |
+| `create-release` | `false` | Create a GitHub Release with changie version notes |
+
+**Outputs:**
+
+| Output | Description |
+|--------|-------------|
+| `version` | Version from `changie latest` |
+| `tag` | Full tag that was created |
 
 ## Versioning
 

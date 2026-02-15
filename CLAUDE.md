@@ -54,6 +54,23 @@ actions/
 3. **just integration**: All actions install `just` task runner by default
 4. **Flexible inputs**: Can override defaults for any use case
 
+## Reusable Workflows
+
+Reusable workflows live in `.github/workflows/` and are called with `uses:` from other repos:
+
+| Workflow | Purpose |
+|----------|---------|
+| `auto-tag.yml` | Tags releases when release PRs merge (wraps `changie-auto-tag` action) |
+
+## Changie Action Gotchas
+
+- `changie latest` returns versions with `v` prefix - `changie-auto-tag` default `tag-prefix` is empty to avoid `vv` tags. The `tag-prefix` input exists for monorepo/multi-package repos where tags need a package prefix (e.g. `mypackage/v1.0.0`)
+- `changie batch auto` exits non-zero when no unreleased fragments exist - `changie-release` pre-checks the unreleased directory before calling batch
+- `changie-release` reads `.changie.yaml` to find the unreleased directory path (`changesDir`/`unreleasedDir`)
+- PR body template supports `{version}` and `{changelog}` variables resolved via bash substitution
+- `changie-release` supports `version-files` input for bumping version in TOML files (only TOML is supported). Format: `path:key` per line, e.g. `gleam.toml:version`. Only top-level keys are supported. Changes are included in the same commit as the changelog update via `peter-evans/create-pull-request`
+- `changie-auto-tag` supports optional `create-release` input to create a GitHub Release with changie version notes. Uses `.changes/{version}.md` as release notes if available, falls back to `--generate-notes`
+
 ## Adding New Actions
 
 1. Create new directory: `new-action/action.yml`
