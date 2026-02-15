@@ -300,6 +300,71 @@ jobs:
       - uses: tylerbutler/actions/changie-auto-tag@v1
 ```
 
+### changie-check
+
+Check PRs for [changie](https://changie.dev/) changelog entries. Detects PR-added fragments, renders a preview using `changie batch --dry-run`, and reports whether a changelog entry is required based on conventional commit types.
+
+```yaml
+- uses: tylerbutler/actions/changie-check@v1
+  with:
+    base-sha: ${{ github.event.pull_request.base.sha }}
+    head-sha: ${{ github.event.pull_request.head.sha }}
+```
+
+**Inputs:**
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `changie-version` | `latest` | Changie CLI version to install |
+| `working-directory` | `.` | Directory containing `.changie.yaml` |
+| `base-sha` | *(required)* | Base commit SHA to diff against |
+| `head-sha` | *(required)* | Head commit SHA |
+| `require-for-types` | `feat,fix,refactor,security` | Conventional commit types that require a changelog entry |
+
+**Outputs:**
+
+| Output | Description |
+|--------|-------------|
+| `has-entries` | Whether the PR adds changie fragments |
+| `preview` | Rendered markdown preview of PR-added entries |
+| `needs-entry` | Whether the PR should have a changelog entry but doesn't |
+| `commit-types-found` | Conventional commit types found in PR commits |
+
+**Example (PR validation with sticky comments):**
+
+```yaml
+jobs:
+  changelog:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: tylerbutler/actions/changie-check@v1
+        id: changelog
+        with:
+          base-sha: ${{ github.event.pull_request.base.sha }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+      - name: Comment with changelog preview
+        if: steps.changelog.outputs.has-entries == 'true'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: changelog
+          message: |
+            ## Changelog Preview
+            ${{ steps.changelog.outputs.preview }}
+      - name: Warn about missing changelog
+        if: steps.changelog.outputs.needs-entry == 'true'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: changelog
+          message: |
+            ## Missing Changelog Entry
+            This PR has commits (`${{ steps.changelog.outputs.commit-types-found }}`) that typically require a changelog entry. Run `changie new` to add one.
+```
+
 ## Reusable Workflows
 
 ### auto-tag

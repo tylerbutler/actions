@@ -72,6 +72,9 @@ outputs:
   changelog:
     description: 'The changelog content for the released version'
     value: ${{ steps.changelog.outputs.content }}
+  pr-branch:
+    description: 'The pull request branch name'
+    value: ${{ steps.create-pr.outputs.pull-request-branch }}
   pr-number:
     description: 'The pull request number'
     value: ${{ steps.create-pr.outputs.pull-request-number }}
