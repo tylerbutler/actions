@@ -1,0 +1,149 @@
+name: 'Changie Check'
+description: 'Detect PR-added changie fragments, render preview, and check if changelog entry is required'
+
+inputs:
+  changie-version:
+    description: 'Changie CLI version to install'
+    required: false
+    default: 'latest'
+  working-directory:
+    description: 'Directory containing .changie.yaml'
+    required: false
+    default: '.'
+  base-sha:
+    description: 'Base commit SHA to diff against'
+    required: true
+  head-sha:
+    description: 'Head commit SHA'
+    required: true
+  require-for-types:
+    description: 'Comma-separated conventional commit types that require a changelog entry'
+    required: false
+    default: 'feat,fix,refactor,security'
+
+outputs:
+  has-entries:
+    description: 'Whether the PR adds changie fragments'
+    value: ${{ steps.check.outputs.has-entries }}
+  preview:
+    description: 'Rendered markdown preview of PR-added entries'
+    value: ${{ steps.render.outputs.preview }}
+  needs-entry:
+    description: 'Whether the PR should have a changelog entry but does not'
+    value: ${{ steps.require.outputs.needs-entry }}
+  commit-types-found:
+    description: 'Conventional commit types found in PR commits'
+    value: ${{ steps.require.outputs.commit-types-found }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install changie
+      uses: miniscruff/changie-action@6dcc2533cac0495148ed4046c438487e4dceaa23 # ratchet:miniscruff/changie-action@v2.0.0
+      with:
+        version: ${{ inputs.changie-version }}
+
+    - name: Detect PR-added fragments
+      id: check
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        BASE_SHA: ${{ inputs.base-sha }}
+        HEAD_SHA: ${{ inputs.head-sha }}
+      run: |
+        # Read changie config to find the unreleased directory path
+        CHANGES_DIR=$(grep '^changesDir:' .changie.yaml | awk '{print $2}' || echo ".changie.d")
+        UNRELEASED_DIR=$(grep '^unreleasedDir:' .changie.yaml | awk '{print $2}' || echo "unreleased")
+        UNRELEASED_PATH="${CHANGES_DIR}/${UNRELEASED_DIR}"
+        echo "unreleased-path=${UNRELEASED_PATH}" >> "$GITHUB_OUTPUT"
+
+        # Find YAML files added in this PR under the unreleased path
+        FRAGMENTS=$(git diff --name-only --diff-filter=A "${BASE_SHA}...${HEAD_SHA}" -- "${UNRELEASED_PATH}/*.yaml" || true)
+
+        if [ -z "$FRAGMENTS" ]; then
+          echo "No changie fragments added in this PR"
+          echo "has-entries=false" >> "$GITHUB_OUTPUT"
+          echo "fragments=" >> "$GITHUB_OUTPUT"
+        else
+          COUNT=$(echo "$FRAGMENTS" | wc -l | tr -d ' ')
+          echo "Found ${COUNT} changie fragment(s) added in this PR"
+          echo "has-entries=true" >> "$GITHUB_OUTPUT"
+          {
+            echo "fragments<<EOF_FRAGMENTS"
+            echo "$FRAGMENTS"
+            echo "EOF_FRAGMENTS"
+          } >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Render PR-only preview
+      id: render
+      if: steps.check.outputs.has-entries == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        UNRELEASED_PATH: ${{ steps.check.outputs.unreleased-path }}
+        FRAGMENTS: ${{ steps.check.outputs.fragments }}
+      run: |
+        # Remove all fragments from the unreleased directory that were NOT added in this PR.
+        # This is a CI checkout so the working tree is disposable.
+        for file in "${UNRELEASED_PATH}"/*.yaml; do
+          [ -f "$file" ] || continue
+          if ! echo "$FRAGMENTS" | grep -qF "$file"; then
+            rm "$file"
+          fi
+        done
+
+        # Render only the PR-added entries via dry-run
+        PREVIEW=$(changie batch auto --dry-run 2>&1) || true
+
+        {
+          echo "preview<<EOF_PREVIEW"
+          echo "$PREVIEW"
+          echo "EOF_PREVIEW"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Check if changelog entry is required
+      id: require
+      if: steps.check.outputs.has-entries == 'false'
+      shell: bash
+      env:
+        BASE_SHA: ${{ inputs.base-sha }}
+        HEAD_SHA: ${{ inputs.head-sha }}
+        REQUIRE_FOR_TYPES: ${{ inputs.require-for-types }}
+      run: |
+        # Get conventional commit types from PR commit messages
+        COMMIT_TYPES=$(git log --format='%s' "${BASE_SHA}..${HEAD_SHA}" | grep -oP '^[a-z]+(?=[(!:])' | sort -u || true)
+
+        if [ -z "$COMMIT_TYPES" ]; then
+          echo "No conventional commit types found"
+          echo "needs-entry=false" >> "$GITHUB_OUTPUT"
+          echo "commit-types-found=" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        TYPES_CSV=$(echo "$COMMIT_TYPES" | paste -sd ',' -)
+        echo "commit-types-found=${TYPES_CSV}" >> "$GITHUB_OUTPUT"
+        echo "Conventional commit types found: ${TYPES_CSV}"
+
+        # Check for breaking changes (the ! marker)
+        BREAKING=$(git log --format='%s' "${BASE_SHA}..${HEAD_SHA}" | grep -cP '^[a-z]+!' || true)
+        if [ "$BREAKING" -gt 0 ]; then
+          echo "Breaking change detected — changelog entry required"
+          echo "needs-entry=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        # Check if any found types are in the require-for-types list
+        NEEDS_ENTRY=false
+        IFS=',' read -ra REQUIRED <<< "$REQUIRE_FOR_TYPES"
+        for type in $COMMIT_TYPES; do
+          for req in "${REQUIRED[@]}"; do
+            if [ "$type" = "$req" ]; then
+              echo "Commit type '${type}' requires a changelog entry"
+              NEEDS_ENTRY=true
+              break 2
+            fi
+          done
+        done
+
+        echo "needs-entry=${NEEDS_ENTRY}" >> "$GITHUB_OUTPUT"
