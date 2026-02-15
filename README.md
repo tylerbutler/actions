@@ -6,7 +6,7 @@ Reusable composite actions for CI/CD workflows across repositories.
 
 ### setup-gleam
 
-Setup Gleam/BEAM environment with caching and optional JavaScript target support.
+Setup Gleam/BEAM environment with caching, optional Elixir, and optional JavaScript target support.
 
 ```yaml
 - uses: tylerbutler/actions/setup-gleam@v1
@@ -20,16 +20,18 @@ Setup Gleam/BEAM environment with caching and optional JavaScript target support
 |-------|---------|-------------|
 | `erlang-version` | `''` | Erlang/OTP version (ignored if version-file set) |
 | `gleam-version` | `''` | Gleam version (ignored if version-file set) |
+| `elixir-version` | `''` | Elixir version (enables Mix support) |
+| `rebar-version` | `''` | Rebar3 version (used with Elixir) |
 | `version-file` | `.tool-versions` | Path to version file |
 | `version-type` | `strict` | Version matching: strict or loose |
 | `node` | `false` | Setup Node.js for JavaScript target |
 | `node-version` | `22` | Node.js version |
-| `cache` | `true` | Cache Gleam dependencies |
+| `cache` | `true` | Cache Gleam dependencies (and Mix deps when Elixir enabled) |
 | `working-directory` | `.` | Working directory |
 | `install-just` | `true` | Install just task runner |
 | `run-deps` | `true` | Run dependency download |
 
-**Example:**
+**Example (Gleam only):**
 
 ```yaml
 jobs:
@@ -39,6 +41,23 @@ jobs:
       - uses: actions/checkout@v6
       - uses: tylerbutler/actions/setup-gleam@v1
       - run: just test
+```
+
+**Example (Gleam + Elixir):**
+
+```yaml
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: tylerbutler/actions/setup-gleam@v1
+        with:
+          erlang-version: '28.3'
+          gleam-version: '1.14.0'
+          elixir-version: '1.18.4'
+          working-directory: server
+      - run: just test-server
 ```
 
 ### setup-rust
