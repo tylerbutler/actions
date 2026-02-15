@@ -57,6 +57,7 @@ runs:
       with:
         node-version: ${{ inputs.node-version }}
         cache: ${{ inputs.cache == 'true' && inputs.package-manager || '' }}
+        cache-dependency-path: ${{ inputs.working-directory }}
 
     - name: Install dependencies (pnpm)
       if: inputs.run-install == 'true' && inputs.package-manager == 'pnpm'
