@@ -54,6 +54,16 @@ inputs:
     description: 'Delete the release branch after the PR is merged'
     required: false
     default: 'true'
+  version-files:
+    description: |
+      Newline-separated list of TOML files to update with the release version.
+      Each line is formatted as `path:key` where `path` is the file path relative
+      to working-directory and `key` is the top-level TOML key to update.
+      Only top-level TOML keys are supported (e.g. `version`, not `package.version`).
+      The version is written without the `v` prefix (e.g. `0.2.0`).
+      Example: `gleam.toml:version`
+    required: false
+    default: ''
 
 outputs:
   version:
@@ -128,6 +138,25 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: echo "version=$(changie latest)" >> "$GITHUB_OUTPUT"
+
+    - name: Bump version files
+      if: steps.check-changes.outputs.skipped != 'true' && inputs.version-files != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        VERSION: ${{ steps.version.outputs.version }}
+        VERSION_FILES: ${{ inputs.version-files }}
+      run: |
+        SEMVER="${VERSION#v}"
+        while IFS=: read -r file key; do
+          [ -z "$file" ] && continue
+          if [ ! -f "$file" ]; then
+            echo "::error::Version file not found: $file"
+            exit 1
+          fi
+          sed -i "s/^${key} = \".*\"/${key} = \"${SEMVER}\"/" "$file"
+          echo "Updated ${file}: ${key} = \"${SEMVER}\""
+        done <<< "$VERSION_FILES"
 
     - name: Read changelog
       if: steps.check-changes.outputs.skipped != 'true'

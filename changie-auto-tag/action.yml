@@ -18,6 +18,10 @@ inputs:
     description: 'GitHub token for pushing the tag'
     required: false
     default: ${{ github.token }}
+  create-release:
+    description: 'Create a GitHub Release from the tag with changie version notes'
+    required: false
+    default: false
 
 outputs:
   version:
@@ -49,3 +53,19 @@ runs:
         echo "tag=$tag" >> "$GITHUB_OUTPUT"
         git tag "$tag"
         git push origin "$tag"
+
+    - name: Create GitHub Release
+      if: inputs.create-release == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        TAG: ${{ steps.version.outputs.tag }}
+        VERSION: ${{ steps.version.outputs.version }}
+      run: |
+        NOTES_FILE=".changes/${VERSION}.md"
+        if [ -f "$NOTES_FILE" ]; then
+          gh release create "$TAG" --title "$TAG" --notes-file "$NOTES_FILE"
+        else
+          gh release create "$TAG" --title "$TAG" --generate-notes
+        fi
