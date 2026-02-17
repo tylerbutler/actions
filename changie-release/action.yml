@@ -25,7 +25,7 @@ inputs:
   branch-template:
     description: 'Branch name template ({version} is replaced with resolved version)'
     required: false
-    default: 'release/{version}'
+    default: 'release/next'
   commit-message-template:
     description: 'Commit message template ({version} is replaced with resolved version)'
     required: false
