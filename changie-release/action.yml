@@ -3,9 +3,17 @@ description: 'Batch changie changelog entries and create a release pull request'
 
 inputs:
   version:
-    description: 'Version to batch: auto, major, minor, patch, or explicit semver'
+    description: 'Version to batch: auto, major, minor, patch, or explicit semver. Ignored when projects is set.'
     required: false
     default: 'auto'
+  projects:
+    description: |
+      Comma-separated changie project keys for multi-package repos.
+      When set, each project is batched independently with auto versioning.
+      Requires `projects` and `projectsVersionSeparator` in .changie.yaml.
+      Example: `vestibule,vestibule_apple,vestibule_google`
+    required: false
+    default: ''
   changie-version:
     description: 'Changie CLI version to install'
     required: false
@@ -23,7 +31,10 @@ inputs:
     required: false
     default: 'Release {version}'
   branch-template:
-    description: 'Branch name template ({version} is replaced with resolved version)'
+    description: |
+      Branch name template ({version} is replaced with resolved version).
+      In multi-project mode, {version} is replaced with "next" since multiple
+      versions don't make valid branch names.
     required: false
     default: 'release/next'
   commit-message-template:
@@ -57,20 +68,23 @@ inputs:
   version-files:
     description: |
       Newline-separated list of TOML files to update with the release version.
-      Each line is formatted as `path:key` where `path` is the file path relative
-      to working-directory and `key` is the top-level TOML key to update.
-      Only top-level TOML keys are supported (e.g. `version`, not `package.version`).
-      The version is written without the `v` prefix (e.g. `0.2.0`).
-      Example: `gleam.toml:version`
+      Only top-level TOML keys are supported. Version is written without the `v` prefix.
+
+      Single-project format (one colon): `path:key`
+        Example: `gleam.toml:version`
+
+      Multi-project format (two colons): `project:path:key`
+        Example: `vestibule:gleam.toml:version`
+        Only projects that were actually batched will have their version files updated.
     required: false
     default: ''
 
 outputs:
   version:
-    description: 'The resolved release version'
+    description: 'The resolved release version (comma-separated in multi-project mode)'
     value: ${{ steps.version.outputs.version }}
   changelog:
-    description: 'The changelog content for the released version'
+    description: 'The changelog content for the released version(s)'
     value: ${{ steps.changelog.outputs.content }}
   pr-branch:
     description: 'The pull request branch name'
@@ -85,8 +99,11 @@ outputs:
     description: 'The pull request operation performed (created, updated, closed, or noop)'
     value: ${{ steps.create-pr.outputs.pull-request-operation }}
   skipped:
-    description: 'Whether the action was skipped due to no unreleased changes'
-    value: ${{ steps.check-changes.outputs.skipped }}
+    description: 'Whether the action was skipped due to no changes or no versions resolved'
+    value: ${{ steps.check-changes.outputs.skipped == 'true' || steps.verify.outputs.proceed != 'true' }}
+  batched-projects:
+    description: 'Comma-separated list of project keys that were batched (multi-project mode only)'
+    value: ${{ steps.batch.outputs.batched-projects }}
 
 runs:
   using: composite
@@ -106,6 +123,8 @@ runs:
         UNRELEASED_DIR=$(grep '^unreleasedDir:' .changie.yaml | awk '{print $2}' || echo "unreleased")
         UNRELEASED_PATH="${CHANGES_DIR}/${UNRELEASED_DIR}"
 
+        echo "changes-dir=${CHANGES_DIR}" >> "$GITHUB_OUTPUT"
+
         # Check for .yaml change fragments (exclude .gitkeep and other non-yaml files)
         FRAGMENT_COUNT=$(find "$UNRELEASED_PATH" -maxdepth 1 -name '*.yaml' 2>/dev/null | wc -l)
         if [ "$FRAGMENT_COUNT" -eq 0 ]; then
@@ -123,11 +142,53 @@ runs:
         echo "::error::No unreleased change fragments found"
         exit 1
 
-    - name: Batch changelog
+    - name: Read project configuration
       if: steps.check-changes.outputs.skipped != 'true'
+      id: config
       shell: bash
       working-directory: ${{ inputs.working-directory }}
-      run: changie batch ${{ inputs.version }}
+      env:
+        PROJECTS: ${{ inputs.projects }}
+      run: |
+        if [ -n "$PROJECTS" ]; then
+          echo "has-projects=true" >> "$GITHUB_OUTPUT"
+          # Read projectsVersionSeparator from changie config (default: "-")
+          SEP=$(grep '^projectsVersionSeparator:' .changie.yaml | awk '{print $2}' | tr -d "\"'" 2>/dev/null || true)
+          echo "separator=${SEP:--}" >> "$GITHUB_OUTPUT"
+        else
+          echo "has-projects=false" >> "$GITHUB_OUTPUT"
+          echo "separator=" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Batch changelog
+      if: steps.check-changes.outputs.skipped != 'true'
+      id: batch
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        PROJECTS: ${{ inputs.projects }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        if [ -n "$PROJECTS" ]; then
+          BATCHED=""
+          IFS=',' read -ra PROJECT_LIST <<< "$PROJECTS"
+          for raw_project in "${PROJECT_LIST[@]}"; do
+            project=$(echo "$raw_project" | xargs)
+            if changie batch auto --project "$project" 2>/dev/null; then
+              echo "✓ Batched: $project"
+              BATCHED="${BATCHED:+$BATCHED,}$project"
+            else
+              echo "· No changes: $project"
+            fi
+          done
+          echo "batched-projects=$BATCHED" >> "$GITHUB_OUTPUT"
+          if [ -z "$BATCHED" ]; then
+            echo "::warning::No projects had unreleased changes to batch"
+          fi
+        else
+          changie batch $VERSION
+          echo "batched-projects=" >> "$GITHUB_OUTPUT"
+        fi
 
     - name: Merge changelog
       if: steps.check-changes.outputs.skipped != 'true'
@@ -140,48 +201,140 @@ runs:
       id: version
       shell: bash
       working-directory: ${{ inputs.working-directory }}
-      run: echo "version=$(changie latest)" >> "$GITHUB_OUTPUT"
+      env:
+        PROJECTS: ${{ inputs.projects }}
+        BATCHED: ${{ steps.batch.outputs.batched-projects }}
+      run: |
+        if [ -n "$PROJECTS" ]; then
+          if [ -z "$BATCHED" ]; then
+            echo "version=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          VERSIONS=""
+          IFS=',' read -ra BATCHED_LIST <<< "$BATCHED"
+          for project in "${BATCHED_LIST[@]}"; do
+            ver=$(changie latest --project "$project" 2>/dev/null || true)
+            [ -z "$ver" ] && continue
+            VERSIONS="${VERSIONS:+$VERSIONS, }$ver"
+          done
+          echo "version=$VERSIONS" >> "$GITHUB_OUTPUT"
+        else
+          echo "version=$(changie latest)" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Verify versions resolved
+      if: steps.check-changes.outputs.skipped != 'true'
+      id: verify
+      shell: bash
+      env:
+        VERSION: ${{ steps.version.outputs.version }}
+      run: |
+        if [ -z "$VERSION" ]; then
+          echo "No new versions resolved — nothing to release"
+          echo "proceed=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "Releasing: $VERSION"
+          echo "proceed=true" >> "$GITHUB_OUTPUT"
+        fi
 
     - name: Bump version files
-      if: steps.check-changes.outputs.skipped != 'true' && inputs.version-files != ''
+      if: steps.check-changes.outputs.skipped != 'true' && steps.verify.outputs.proceed == 'true' && inputs.version-files != ''
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
+        PROJECTS: ${{ inputs.projects }}
         VERSION: ${{ steps.version.outputs.version }}
         VERSION_FILES: ${{ inputs.version-files }}
+        BATCHED: ${{ steps.batch.outputs.batched-projects }}
+        SEPARATOR: ${{ steps.config.outputs.separator }}
       run: |
-        SEMVER="${VERSION#v}"
-        while IFS=: read -r file key; do
-          [ -z "$file" ] && continue
-          if [ ! -f "$file" ]; then
-            echo "::error::Version file not found: $file"
-            exit 1
-          fi
-          sed -i "s/^${key} = \".*\"/${key} = \"${SEMVER}\"/" "$file"
-          echo "Updated ${file}: ${key} = \"${SEMVER}\""
-        done <<< "$VERSION_FILES"
+        if [ -n "$PROJECTS" ]; then
+          # Multi-project format: project:path:key
+          while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            project=$(echo "$line" | cut -d: -f1 | xargs)
+            file=$(echo "$line" | cut -d: -f2 | xargs)
+            key=$(echo "$line" | cut -d: -f3 | xargs)
+
+            # Skip if this project wasn't batched
+            if ! echo ",$BATCHED," | grep -q ",$project,"; then
+              echo "Skipping $project (not batched)"
+              continue
+            fi
+
+            ver=$(changie latest --project "$project" 2>/dev/null || true)
+            [ -z "$ver" ] && continue
+
+            # Extract semver: strip "{project}{separator}v" prefix
+            semver="${ver#"${project}${SEPARATOR}v"}"
+
+            if [ ! -f "$file" ]; then
+              echo "::error::Version file not found: $file"
+              exit 1
+            fi
+            sed -i "s/^${key} = \".*\"/${key} = \"${semver}\"/" "$file"
+            echo "Updated ${file}: ${key} = \"${semver}\""
+          done <<< "$VERSION_FILES"
+        else
+          # Single-project format: path:key
+          SEMVER="${VERSION#v}"
+          while IFS=: read -r file key; do
+            [ -z "$file" ] && continue
+            if [ ! -f "$file" ]; then
+              echo "::error::Version file not found: $file"
+              exit 1
+            fi
+            sed -i "s/^${key} = \".*\"/${key} = \"${SEMVER}\"/" "$file"
+            echo "Updated ${file}: ${key} = \"${SEMVER}\""
+          done <<< "$VERSION_FILES"
+        fi
 
     - name: Read changelog
-      if: steps.check-changes.outputs.skipped != 'true'
+      if: steps.check-changes.outputs.skipped != 'true' && steps.verify.outputs.proceed == 'true'
       id: changelog
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
+        PROJECTS: ${{ inputs.projects }}
         VERSION: ${{ steps.version.outputs.version }}
+        BATCHED: ${{ steps.batch.outputs.batched-projects }}
+        SEPARATOR: ${{ steps.config.outputs.separator }}
+        CHANGES_DIR: ${{ steps.check-changes.outputs.changes-dir }}
       run: |
-        CHANGES_FILE=".changes/${VERSION}.md"
-        if [ -f "$CHANGES_FILE" ]; then
+        if [ -n "$PROJECTS" ]; then
+          # Multi-project: aggregate changelogs from each batched project
+          CONTENT=""
+          IFS=',' read -ra BATCHED_LIST <<< "$BATCHED"
+          for project in "${BATCHED_LIST[@]}"; do
+            ver=$(changie latest --project "$project" 2>/dev/null || true)
+            [ -z "$ver" ] && continue
+            ver_suffix="${ver#"${project}${SEPARATOR}"}"
+            ver_file="${CHANGES_DIR}/${project}/${ver_suffix}.md"
+            if [ -f "$ver_file" ]; then
+              CONTENT="${CONTENT}### ${project} ${ver_suffix}"$'\n\n'
+              CONTENT="${CONTENT}$(cat "$ver_file")"$'\n\n'
+            fi
+          done
           {
             echo "content<<EOF_CHANGELOG"
-            cat "$CHANGES_FILE"
+            echo "$CONTENT"
             echo "EOF_CHANGELOG"
           } >> "$GITHUB_OUTPUT"
         else
-          echo "content=" >> "$GITHUB_OUTPUT"
+          CHANGES_FILE="${CHANGES_DIR}/${VERSION}.md"
+          if [ -f "$CHANGES_FILE" ]; then
+            {
+              echo "content<<EOF_CHANGELOG"
+              cat "$CHANGES_FILE"
+              echo "EOF_CHANGELOG"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "content=" >> "$GITHUB_OUTPUT"
+          fi
         fi
 
     - name: Resolve templates
-      if: steps.check-changes.outputs.skipped != 'true'
+      if: steps.check-changes.outputs.skipped != 'true' && steps.verify.outputs.proceed == 'true'
       id: templates
       shell: bash
       env:
@@ -191,10 +344,19 @@ runs:
         COMMIT_TPL: ${{ inputs.commit-message-template }}
         BODY_TPL: ${{ inputs.pr-body-template }}
         CHANGELOG: ${{ steps.changelog.outputs.content }}
+        HAS_PROJECTS: ${{ steps.config.outputs.has-projects }}
       run: |
         echo "pr-title=${TITLE_TPL//\{version\}/$VERSION}" >> "$GITHUB_OUTPUT"
-        echo "branch=${BRANCH_TPL//\{version\}/$VERSION}" >> "$GITHUB_OUTPUT"
         echo "commit-message=${COMMIT_TPL//\{version\}/$VERSION}" >> "$GITHUB_OUTPUT"
+
+        # In multi-project mode, use "next" for branch names since comma-separated
+        # versions don't make valid git branch names
+        if [ "$HAS_PROJECTS" = "true" ]; then
+          echo "branch=${BRANCH_TPL//\{version\}/next}" >> "$GITHUB_OUTPUT"
+        else
+          echo "branch=${BRANCH_TPL//\{version\}/$VERSION}" >> "$GITHUB_OUTPUT"
+        fi
+
         RESOLVED="${BODY_TPL//\{version\}/$VERSION}"
         RESOLVED="${RESOLVED//\{changelog\}/$CHANGELOG}"
         {
@@ -204,7 +366,7 @@ runs:
         } >> "$GITHUB_OUTPUT"
 
     - name: Create release pull request
-      if: steps.check-changes.outputs.skipped != 'true'
+      if: steps.check-changes.outputs.skipped != 'true' && steps.verify.outputs.proceed == 'true'
       id: create-pr
       uses: peter-evans/create-pull-request@c0f553fe549906ede9cf27b5156039d195d2ece0 # ratchet:peter-evans/create-pull-request@v8
       with:

@@ -1,5 +1,5 @@
 name: 'Changie Auto-tag'
-description: 'Create a version tag from the latest changie release'
+description: 'Create version tags from the latest changie release(s)'
 
 inputs:
   changie-version:
@@ -14,6 +14,14 @@ inputs:
     description: 'Prefix for the git tag (changie latest already includes "v", so default is empty)'
     required: false
     default: ''
+  projects:
+    description: |
+      Comma-separated changie project keys for multi-package repos.
+      When set, creates tags for each project that has a new version.
+      Tags that already exist are skipped.
+      Example: `vestibule,vestibule_apple,vestibule_google`
+    required: false
+    default: ''
   token:
     description: 'GitHub token for pushing the tag'
     required: false
@@ -25,11 +33,14 @@ inputs:
 
 outputs:
   version:
-    description: 'The version from changie latest'
+    description: 'The version(s) from changie latest (comma-separated in multi-project mode)'
     value: ${{ steps.version.outputs.version }}
   tag:
-    description: 'The full tag that was created'
+    description: 'The tag(s) that were created (comma-separated in multi-project mode)'
     value: ${{ steps.version.outputs.tag }}
+  created-tags:
+    description: 'Space-separated list of tags actually created (excludes already-existing tags)'
+    value: ${{ steps.version.outputs.created-tags }}
 
 runs:
   using: composite
@@ -39,33 +50,116 @@ runs:
       with:
         version: ${{ inputs.changie-version }}
 
-    - name: Get version and create tag
+    - name: Read project configuration
+      id: config
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        PROJECTS: ${{ inputs.projects }}
+      run: |
+        if [ -n "$PROJECTS" ]; then
+          CHANGES_DIR=$(grep '^changesDir:' .changie.yaml | awk '{print $2}' || echo ".changie.d")
+          SEP=$(grep '^projectsVersionSeparator:' .changie.yaml | awk '{print $2}' | tr -d "\"'" 2>/dev/null || true)
+          echo "changes-dir=${CHANGES_DIR}" >> "$GITHUB_OUTPUT"
+          echo "separator=${SEP:--}" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Get version and create tags
       id: version
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
         PREFIX: ${{ inputs.tag-prefix }}
+        PROJECTS: ${{ inputs.projects }}
         GITHUB_TOKEN: ${{ inputs.token }}
       run: |
-        version=$(changie latest)
-        tag="${PREFIX}${version}"
-        echo "version=$version" >> "$GITHUB_OUTPUT"
-        echo "tag=$tag" >> "$GITHUB_OUTPUT"
-        git tag "$tag"
-        git push origin "$tag"
+        if [ -n "$PROJECTS" ]; then
+          CREATED_TAGS=""
+          ALL_VERSIONS=""
+          ALL_TAGS=""
+          IFS=',' read -ra PROJECT_LIST <<< "$PROJECTS"
+          for raw_project in "${PROJECT_LIST[@]}"; do
+            project=$(echo "$raw_project" | xargs)
+            version=$(changie latest --project "$project" 2>/dev/null || true)
+            if [ -z "$version" ]; then
+              echo "Could not resolve version for $project, skipping"
+              continue
+            fi
+            tag="${PREFIX}${version}"
+            ALL_VERSIONS="${ALL_VERSIONS:+$ALL_VERSIONS, }$version"
+            ALL_TAGS="${ALL_TAGS:+$ALL_TAGS, }$tag"
+            if git tag -l "$tag" | grep -q .; then
+              echo "Tag $tag already exists, skipping"
+              continue
+            fi
+            git tag "$tag"
+            CREATED_TAGS="${CREATED_TAGS:+$CREATED_TAGS }$tag"
+            echo "Created tag: $tag"
+          done
 
-    - name: Create GitHub Release
+          if [ -n "$CREATED_TAGS" ]; then
+            git push origin $CREATED_TAGS
+          else
+            echo "No new tags to push"
+          fi
+
+          echo "version=$ALL_VERSIONS" >> "$GITHUB_OUTPUT"
+          echo "tag=$ALL_TAGS" >> "$GITHUB_OUTPUT"
+          echo "created-tags=$CREATED_TAGS" >> "$GITHUB_OUTPUT"
+        else
+          version=$(changie latest)
+          tag="${PREFIX}${version}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "created-tags=$tag" >> "$GITHUB_OUTPUT"
+          git tag "$tag"
+          git push origin "$tag"
+        fi
+
+    - name: Create GitHub Releases
       if: inputs.create-release == 'true'
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
         GH_TOKEN: ${{ inputs.token }}
-        TAG: ${{ steps.version.outputs.tag }}
-        VERSION: ${{ steps.version.outputs.version }}
+        PROJECTS: ${{ inputs.projects }}
+        PREFIX: ${{ inputs.tag-prefix }}
+        CREATED_TAGS: ${{ steps.version.outputs.created-tags }}
+        CHANGES_DIR: ${{ steps.config.outputs.changes-dir }}
+        SEPARATOR: ${{ steps.config.outputs.separator }}
       run: |
-        NOTES_FILE=".changes/${VERSION}.md"
-        if [ -f "$NOTES_FILE" ]; then
-          gh release create "$TAG" --title "$TAG" --notes-file "$NOTES_FILE"
+        if [ -n "$PROJECTS" ]; then
+          # Multi-project: create a release for each newly-created tag
+          IFS=',' read -ra PROJECT_LIST <<< "$PROJECTS"
+          for raw_project in "${PROJECT_LIST[@]}"; do
+            project=$(echo "$raw_project" | xargs)
+            version=$(changie latest --project "$project" 2>/dev/null || true)
+            [ -z "$version" ] && continue
+            tag="${PREFIX}${version}"
+
+            # Only create releases for tags we just created
+            if ! echo " $CREATED_TAGS " | grep -q " $tag "; then
+              continue
+            fi
+
+            # Resolve changelog file: .changes/{project}/{version_suffix}.md
+            ver_suffix="${version#"${project}${SEPARATOR}"}"
+            NOTES_FILE="${CHANGES_DIR}/${project}/${ver_suffix}.md"
+
+            echo "Creating release for $tag"
+            if [ -f "$NOTES_FILE" ]; then
+              gh release create "$tag" --title "$tag" --notes-file "$NOTES_FILE"
+            else
+              gh release create "$tag" --title "$tag" --generate-notes
+            fi
+          done
         else
-          gh release create "$TAG" --title "$TAG" --generate-notes
+          TAG="$CREATED_TAGS"
+          VERSION=$(changie latest)
+          NOTES_FILE="${CHANGES_DIR:-".changes"}/${VERSION}.md"
+          if [ -f "$NOTES_FILE" ]; then
+            gh release create "$TAG" --title "$TAG" --notes-file "$NOTES_FILE"
+          else
+            gh release create "$TAG" --title "$TAG" --generate-notes
+          fi
         fi

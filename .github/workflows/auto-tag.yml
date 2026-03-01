@@ -18,6 +18,11 @@ on:
         required: false
         type: string
         default: ''
+      projects:
+        description: 'Comma-separated changie project keys for multi-package repos'
+        required: false
+        type: string
+        default: ''
       create-release:
         description: 'Create a GitHub Release from the tag with changie version notes'
         required: false
@@ -25,11 +30,14 @@ on:
         default: false
     outputs:
       version:
-        description: 'The version from changie latest'
+        description: 'The version(s) from changie latest'
         value: ${{ jobs.tag.outputs.version }}
       tag:
-        description: 'The full tag that was created'
+        description: 'The full tag(s) that were created'
         value: ${{ jobs.tag.outputs.tag }}
+      created-tags:
+        description: 'Space-separated list of tags actually created'
+        value: ${{ jobs.tag.outputs.created-tags }}
 
 permissions:
   contents: write
@@ -41,6 +49,7 @@ jobs:
     outputs:
       version: ${{ steps.auto-tag.outputs.version }}
       tag: ${{ steps.auto-tag.outputs.tag }}
+      created-tags: ${{ steps.auto-tag.outputs.created-tags }}
     steps:
       - uses: actions/checkout@v4
 
@@ -50,4 +59,5 @@ jobs:
           changie-version: ${{ inputs.changie-version }}
           working-directory: ${{ inputs.working-directory }}
           tag-prefix: ${{ inputs.tag-prefix }}
+          projects: ${{ inputs.projects }}
           create-release: ${{ inputs.create-release }}
