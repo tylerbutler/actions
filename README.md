@@ -419,6 +419,86 @@ jobs:
 | `version` | Version from `changie latest` |
 | `tag` | Full tag that was created |
 
+### binary-size
+
+Measure binary file sizes, compare against a cached baseline from the base branch, and output a markdown report. Language-agnostic — works with any build system that produces files.
+
+```yaml
+- uses: tylerbutler/actions/binary-size@v1
+  id: size
+  with:
+    paths: |
+      target/release/myapp
+      target/release/cli
+```
+
+**Inputs:**
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `paths` | *(required)* | Newline-separated list of file paths to measure |
+| `base-branch` | `main` | Branch to load baseline sizes from for comparison |
+| `cache-key-prefix` | `binary-size` | Prefix for cache keys (use different values for independent trackers) |
+| `working-directory` | `.` | Working directory for resolving relative paths |
+
+**Outputs:**
+
+| Output | Description |
+|--------|-------------|
+| `report` | Markdown-formatted size report with deltas |
+| `sizes-json` | JSON object mapping file paths to sizes in bytes |
+| `total-size` | Total size of all measured files in bytes |
+| `total-delta` | Total change vs baseline in bytes (signed integer, 0 when no baseline) |
+| `has-baseline` | Whether a baseline was found for comparison |
+
+**Example (Rust project with PR comment):**
+
+```yaml
+jobs:
+  binary-size:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: tylerbutler/actions/setup-rust@v1
+      - run: cargo build --release
+      - uses: tylerbutler/actions/binary-size@v1
+        id: size
+        with:
+          paths: |
+            target/release/myapp
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: binary-size
+          message: ${{ steps.size.outputs.report }}
+```
+
+**Example (Go project, multiple binaries):**
+
+```yaml
+- run: go build -o build/ ./cmd/...
+- uses: tylerbutler/actions/binary-size@v1
+  id: size
+  with:
+    paths: |
+      build/server
+      build/cli
+      build/worker
+    working-directory: '.'
+```
+
+**How it works:**
+
+1. Restores baseline sizes from the GitHub Actions cache (keyed by base branch)
+2. Measures current file sizes using `stat`
+3. Computes deltas and generates a markdown report table
+4. Saves current sizes to cache for future comparisons
+
+The first run on a branch has no baseline, so the report shows sizes only. Once that run's cache is saved, subsequent PRs targeting that branch get delta comparisons.
+
 ## Versioning
 
 Use semantic versioning tags:
