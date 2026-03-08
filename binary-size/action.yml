@@ -1,0 +1,223 @@
+name: 'Binary Size Report'
+description: 'Measure binary file sizes, compare against a cached baseline, and output a markdown report'
+
+inputs:
+  paths:
+    description: 'Newline-separated list of file paths to measure'
+    required: true
+  base-branch:
+    description: 'Branch to load baseline sizes from for comparison'
+    required: false
+    default: 'main'
+  cache-key-prefix:
+    description: 'Prefix for cache keys (use different values for independent trackers in the same repo)'
+    required: false
+    default: 'binary-size'
+  working-directory:
+    description: 'Working directory for resolving relative paths'
+    required: false
+    default: '.'
+
+outputs:
+  report:
+    description: 'Markdown-formatted size report with deltas'
+    value: ${{ steps.report.outputs.report }}
+  sizes-json:
+    description: 'JSON object mapping file paths to sizes in bytes'
+    value: ${{ steps.measure.outputs.sizes-json }}
+  total-size:
+    description: 'Total size of all measured files in bytes'
+    value: ${{ steps.measure.outputs.total-size }}
+  total-delta:
+    description: 'Total change vs baseline in bytes (signed integer, 0 when no baseline)'
+    value: ${{ steps.report.outputs.total-delta }}
+  has-baseline:
+    description: 'Whether a baseline was found for comparison'
+    value: ${{ steps.check-baseline.outputs.has-baseline }}
+
+runs:
+  using: composite
+  steps:
+    - name: Compute cache keys
+      id: cache-keys
+      shell: bash
+      env:
+        INPUT_PATHS: ${{ inputs.paths }}
+        CACHE_PREFIX: ${{ inputs.cache-key-prefix }}
+        BASE_BRANCH: ${{ inputs.base-branch }}
+        SAVE_BRANCH: ${{ github.head_ref || github.ref_name }}
+      run: |
+        # Hash the paths input so different file sets get independent caches
+        if command -v sha256sum &>/dev/null; then
+          PATHS_HASH=$(echo "$INPUT_PATHS" | sha256sum | cut -c1-16)
+        else
+          PATHS_HASH=$(echo "$INPUT_PATHS" | shasum -a 256 | cut -c1-16)
+        fi
+
+        # Sanitize branch names for cache key (replace / with -)
+        SAVE_BRANCH_SAFE=$(echo "$SAVE_BRANCH" | tr '/' '-')
+        BASE_BRANCH_SAFE=$(echo "$BASE_BRANCH" | tr '/' '-')
+
+        echo "save-key=${CACHE_PREFIX}-${SAVE_BRANCH_SAFE}-${PATHS_HASH}-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+        echo "restore-prefix=${CACHE_PREFIX}-${BASE_BRANCH_SAFE}-${PATHS_HASH}-" >> "$GITHUB_OUTPUT"
+
+    - name: Restore baseline sizes from cache
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # ratchet:actions/cache/restore@v4
+      with:
+        path: /tmp/binary-size-cache
+        key: ${{ steps.cache-keys.outputs.restore-prefix }}${{ github.sha }}
+        restore-keys: |
+          ${{ steps.cache-keys.outputs.restore-prefix }}
+
+    - name: Check baseline availability
+      id: check-baseline
+      shell: bash
+      run: |
+        if [ -f /tmp/binary-size-cache/sizes.json ]; then
+          echo "has-baseline=true" >> "$GITHUB_OUTPUT"
+          # Preserve baseline before the measure step overwrites the cache directory
+          cp /tmp/binary-size-cache/sizes.json /tmp/binary-size-baseline.json
+          echo "Baseline loaded from cache"
+        else
+          echo "has-baseline=false" >> "$GITHUB_OUTPUT"
+          mkdir -p /tmp/binary-size-cache
+          echo "No baseline found — sizes will be reported without comparison"
+        fi
+
+    - name: Measure file sizes
+      id: measure
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        INPUT_PATHS: ${{ inputs.paths }}
+      run: |
+        SIZES_JSON="{}"
+        TOTAL_SIZE=0
+
+        while IFS= read -r filepath; do
+          filepath=$(echo "$filepath" | xargs)
+          [ -z "$filepath" ] && continue
+          [[ "$filepath" == \#* ]] && continue
+
+          if [ ! -f "$filepath" ]; then
+            echo "::warning::File not found: ${filepath}"
+            continue
+          fi
+
+          if [[ "$OSTYPE" == "darwin"* ]]; then
+            FILE_SIZE=$(stat -f %z "$filepath")
+          else
+            FILE_SIZE=$(stat -c %s "$filepath")
+          fi
+
+          SIZES_JSON=$(echo "$SIZES_JSON" | jq --arg path "$filepath" --argjson size "$FILE_SIZE" '. + {($path): $size}')
+          TOTAL_SIZE=$((TOTAL_SIZE + FILE_SIZE))
+        done <<< "$INPUT_PATHS"
+
+        echo "total-size=${TOTAL_SIZE}" >> "$GITHUB_OUTPUT"
+        {
+          echo "sizes-json<<EOF_SIZES"
+          echo "$SIZES_JSON"
+          echo "EOF_SIZES"
+        } >> "$GITHUB_OUTPUT"
+
+        # Write current sizes to cache location for saving
+        echo "$SIZES_JSON" > /tmp/binary-size-cache/sizes.json
+
+    - name: Generate report
+      id: report
+      shell: bash
+      env:
+        HAS_BASELINE: ${{ steps.check-baseline.outputs.has-baseline }}
+        CURRENT_TOTAL: ${{ steps.measure.outputs.total-size }}
+        BASE_BRANCH: ${{ inputs.base-branch }}
+      run: |
+        format_size() {
+          awk -v bytes="$1" 'BEGIN {
+            if (bytes < 0) { sign = "-"; bytes = -bytes } else { sign = "" }
+            if (bytes >= 1073741824) printf "%s%.2f GB", sign, bytes / 1073741824
+            else if (bytes >= 1048576) printf "%s%.2f MB", sign, bytes / 1048576
+            else if (bytes >= 1024) printf "%s%.2f KB", sign, bytes / 1024
+            else printf "%s%d B", sign, bytes
+          }'
+        }
+
+        format_delta() {
+          local delta=$1
+          if [ "$delta" -gt 0 ] 2>/dev/null; then
+            echo "+$(format_size "$delta")"
+          elif [ "$delta" -lt 0 ] 2>/dev/null; then
+            echo "$(format_size "$delta")"
+          else
+            echo "±0 B"
+          fi
+        }
+
+        format_percent() {
+          awk -v old="$1" -v new="$2" 'BEGIN {
+            if (old == 0) {
+              if (new == 0) printf "±0%%"
+              else printf "new"
+            } else {
+              pct = (new - old) / old * 100
+              if (pct > 0) printf "+%.2f%%", pct
+              else if (pct < 0) printf "%.2f%%", pct
+              else printf "±0%%"
+            }
+          }'
+        }
+
+        CURRENT=$(cat /tmp/binary-size-cache/sizes.json)
+        FILES=$(echo "$CURRENT" | jq -r 'keys[]' | sort)
+
+        TOTAL_DELTA=0
+        REPORT="### 📦 Binary Size Report"$'\n\n'
+
+        if [ "$HAS_BASELINE" = "true" ]; then
+          BASELINE=$(cat /tmp/binary-size-baseline.json)
+          BASELINE_TOTAL=0
+
+          REPORT+="| File | Size | Δ Delta | % Change |"$'\n'
+          REPORT+="|------|------|---------|----------|"$'\n'
+
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            CUR_SIZE=$(echo "$CURRENT" | jq -r --arg f "$file" '.[$f]')
+            BASE_SIZE=$(echo "$BASELINE" | jq -r --arg f "$file" '.[$f] // 0')
+            DELTA=$((CUR_SIZE - BASE_SIZE))
+            BASELINE_TOTAL=$((BASELINE_TOTAL + BASE_SIZE))
+
+            REPORT+="| \`${file}\` | $(format_size "$CUR_SIZE") | $(format_delta "$DELTA") | $(format_percent "$BASE_SIZE" "$CUR_SIZE") |"$'\n'
+          done <<< "$FILES"
+
+          TOTAL_DELTA=$((CURRENT_TOTAL - BASELINE_TOTAL))
+          REPORT+="| **Total** | **$(format_size "$CURRENT_TOTAL")** | **$(format_delta "$TOTAL_DELTA")** | **$(format_percent "$BASELINE_TOTAL" "$CURRENT_TOTAL")** |"$'\n'
+          REPORT+=$'\n'"<details><summary>Details</summary>"$'\n\n'
+          REPORT+="Compared against baseline from \`${BASE_BRANCH}\`."$'\n\n'
+          REPORT+="</details>"$'\n'
+        else
+          REPORT+="| File | Size |"$'\n'
+          REPORT+="|------|------|"$'\n'
+
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            CUR_SIZE=$(echo "$CURRENT" | jq -r --arg f "$file" '.[$f]')
+            REPORT+="| \`${file}\` | $(format_size "$CUR_SIZE") |"$'\n'
+          done <<< "$FILES"
+
+          REPORT+="| **Total** | **$(format_size "$CURRENT_TOTAL")** |"$'\n'
+          REPORT+=$'\n'"> ℹ️ No baseline found. Sizes will be used as the baseline for future comparisons."$'\n'
+        fi
+
+        echo "total-delta=${TOTAL_DELTA}" >> "$GITHUB_OUTPUT"
+        {
+          echo "report<<EOF_REPORT"
+          echo "$REPORT"
+          echo "EOF_REPORT"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Save current sizes to cache
+      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # ratchet:actions/cache/save@v4
+      with:
+        path: /tmp/binary-size-cache
+        key: ${{ steps.cache-keys.outputs.save-key }}
