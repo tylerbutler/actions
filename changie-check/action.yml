@@ -16,6 +16,13 @@ inputs:
   head-sha:
     description: 'Head commit SHA'
     required: true
+  projects:
+    description: |
+      Comma-separated changie project keys for multi-package repos.
+      When set, renders a preview for each project independently.
+      Example: `levee-driver,levee-client`
+    required: false
+    default: ''
   require-for-types:
     description: 'Comma-separated conventional commit types that require a changelog entry'
     required: false
@@ -83,6 +90,7 @@ runs:
       env:
         UNRELEASED_PATH: ${{ steps.check.outputs.unreleased-path }}
         FRAGMENTS: ${{ steps.check.outputs.fragments }}
+        PROJECTS: ${{ inputs.projects }}
       run: |
         # Remove all fragments from the unreleased directory that were NOT added in this PR.
         # This is a CI checkout so the working tree is disposable.
@@ -94,7 +102,19 @@ runs:
         done
 
         # Render only the PR-added entries via dry-run
-        PREVIEW=$(changie batch auto --dry-run 2>&1) || true
+        if [ -n "$PROJECTS" ]; then
+          PREVIEW=""
+          IFS=',' read -ra PROJECT_LIST <<< "$PROJECTS"
+          for raw_project in "${PROJECT_LIST[@]}"; do
+            project=$(echo "$raw_project" | xargs)
+            PROJECT_PREVIEW=$(changie batch auto --project "$project" --dry-run 2>&1) || true
+            if [ -n "$PROJECT_PREVIEW" ]; then
+              PREVIEW="${PREVIEW}#### ${project}"$'\n\n'"${PROJECT_PREVIEW}"$'\n\n'
+            fi
+          done
+        else
+          PREVIEW=$(changie batch auto --dry-run 2>&1) || true
+        fi
 
         {
           echo "preview<<EOF_PREVIEW"
