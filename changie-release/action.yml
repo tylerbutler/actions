@@ -117,8 +117,6 @@ runs:
       id: check-changes
       shell: bash
       working-directory: ${{ inputs.working-directory }}
-      env:
-        PROJECTS: ${{ inputs.projects }}
       run: |
         # Read changie config to find the unreleased directory
         CHANGES_DIR=$(grep '^changesDir:' .changie.yaml | awk '{print $2}' || echo ".changie.d")
@@ -129,20 +127,8 @@ runs:
 
         # Check for .yaml change fragments (exclude .gitkeep and other non-yaml files)
         FRAGMENT_COUNT=$(find "$UNRELEASED_PATH" -maxdepth 1 -name '*.yaml' 2>/dev/null | wc -l)
-
-        # In multi-project mode, also check project-specific unreleased directories
-        if [ -n "$PROJECTS" ]; then
-          IFS=',' read -ra PROJECT_LIST <<< "$PROJECTS"
-          for raw_project in "${PROJECT_LIST[@]}"; do
-            project=$(echo "$raw_project" | xargs)
-            PROJECT_UNRELEASED="${CHANGES_DIR}/${project}/${UNRELEASED_DIR}"
-            count=$(find "$PROJECT_UNRELEASED" -maxdepth 1 -name '*.yaml' 2>/dev/null | wc -l)
-            FRAGMENT_COUNT=$((FRAGMENT_COUNT + count))
-          done
-        fi
-
         if [ "$FRAGMENT_COUNT" -eq 0 ]; then
-          echo "No unreleased change fragments found"
+          echo "No unreleased change fragments found in $UNRELEASED_PATH"
           echo "skipped=true" >> "$GITHUB_OUTPUT"
         else
           echo "Found $FRAGMENT_COUNT unreleased change fragment(s)"
