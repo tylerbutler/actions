@@ -18,19 +18,19 @@ inputs:
     description: 'Whether to cache Rust artifacts'
     required: false
     default: 'true'
-  install-just:
-    description: 'Whether to install just task runner'
+  tools:
+    description: 'Tools to install via taiki-e/install-action (comma-separated, e.g., "just,cargo-bloat")'
     required: false
-    default: 'true'
+    default: 'just'
 
 runs:
   using: composite
   steps:
-    - name: Install just
-      if: inputs.install-just == 'true'
+    - name: Install tools
+      if: inputs.tools != ''
       uses: taiki-e/install-action@4573997e3b6c0fbc22f7acab193b00a8a3ca817d # ratchet:taiki-e/install-action@v2
       with:
-        tool: just
+        tool: ${{ inputs.tools }}
 
     - name: Install Rust
       uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # ratchet:dtolnay/rust-toolchain@stable

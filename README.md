@@ -81,7 +81,7 @@ Setup Rust toolchain with caching.
 | `cache-key` | `rust` | Custom cache key prefix |
 | `cache-targets` | `true` | Cache target directories |
 | `cache-on-failure` | `true` | Cache even on failure |
-| `install-just` | `true` | Install just task runner |
+| `tools` | `just` | Tools to install via taiki-e/install-action (comma-separated) |
 
 **Example:**
 
