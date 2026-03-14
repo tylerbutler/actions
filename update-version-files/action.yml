@@ -1,0 +1,75 @@
+name: 'Update Version Files'
+description: |
+  Update version strings in TOML files using the version from the nearest ancestor package.json.
+  Uses sed-based replacement for top-level TOML keys.
+
+inputs:
+  files:
+    description: |
+      Newline-separated list of TOML files and keys to update.
+      Format: `path:key`
+
+      The version is auto-detected by walking up from the TOML file's directory
+      to find the nearest package.json and reading its `version` field.
+
+      Only top-level TOML keys are supported (e.g., `version = "1.0.0"`).
+
+      Example:
+        packages/my-pkg/Cargo.toml:version
+        crates/core/Cargo.toml:version
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Update version files
+      shell: bash
+      env:
+        VERSION_FILES: ${{ inputs.files }}
+      run: |
+        while IFS= read -r line; do
+          [ -z "$line" ] && continue
+
+          file=$(echo "$line" | cut -d: -f1 | xargs)
+          key=$(echo "$line" | cut -d: -f2 | xargs)
+
+          if [ -z "$file" ] || [ -z "$key" ]; then
+            echo "::error::Invalid format: '$line'. Expected 'path:key'"
+            exit 1
+          fi
+
+          if [ ! -f "$file" ]; then
+            echo "::error::TOML file not found: $file"
+            exit 1
+          fi
+
+          # Walk up from the TOML file's directory to find nearest package.json
+          search_dir=$(dirname "$file")
+          pkg_json=""
+          while [ "$search_dir" != "." ] && [ "$search_dir" != "/" ]; do
+            if [ -f "${search_dir}/package.json" ]; then
+              pkg_json="${search_dir}/package.json"
+              break
+            fi
+            search_dir=$(dirname "$search_dir")
+          done
+
+          # Check current directory as last resort
+          if [ -z "$pkg_json" ] && [ -f "package.json" ]; then
+            pkg_json="package.json"
+          fi
+
+          if [ -z "$pkg_json" ]; then
+            echo "::error::No package.json found in ancestor directories of $file"
+            exit 1
+          fi
+
+          version=$(node -p "require('./${pkg_json}').version")
+          if [ -z "$version" ]; then
+            echo "::error::Could not read version from $pkg_json"
+            exit 1
+          fi
+
+          sed -i "s/^${key} = \".*\"/${key} = \"${version}\"/" "$file"
+          echo "Updated ${file}: ${key} = \"${version}\" (from ${pkg_json})"
+        done <<< "$VERSION_FILES"
