@@ -499,6 +499,33 @@ jobs:
 
 The first run on a branch has no baseline, so the report shows sizes only. Once that run's cache is saved, subsequent PRs targeting that branch get delta comparisons.
 
+### download-ccl-tests
+
+Download test data JSON files from [CatConfLang/ccl-test-data](https://github.com/CatConfLang/ccl-test-data) GitHub releases with version tracking to skip unnecessary re-downloads.
+
+```yaml
+- uses: tylerbutler/actions/download-ccl-tests@main
+  with:
+    output-dir: crates/sickle/tests/test_data
+```
+
+**Inputs:**
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `version` | `latest` | Release version to download (e.g. `v0.6.2`) |
+| `force` | `false` | Force re-download even if already at target version |
+| `output-dir` | `test_data` | Directory to download test data JSON files into |
+
+**Example (pin to specific version):**
+
+```yaml
+- uses: tylerbutler/actions/download-ccl-tests@main
+  with:
+    version: v0.6.2
+    output-dir: tests/test_data
+```
+
 ## Versioning
 
 Use semantic versioning tags:

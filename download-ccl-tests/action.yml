@@ -1,0 +1,95 @@
+name: 'Download CCL Test Data'
+description: 'Download ccl-test-data from CatConfLang/ccl-test-data GitHub releases with caching and version tracking'
+
+inputs:
+  version:
+    description: 'Release version to download (e.g. v0.6.2). Defaults to latest.'
+    required: false
+    default: 'latest'
+  force:
+    description: 'Force re-download even if already at the target version'
+    required: false
+    default: 'false'
+  output-dir:
+    description: 'Directory to download test data JSON files into'
+    required: false
+    default: 'test_data'
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve CCL test data version
+      id: resolve
+      shell: bash
+      env:
+        REQUESTED_VERSION: ${{ inputs.version }}
+      run: |
+        REPO="CatConfLang/ccl-test-data"
+        if [ "$REQUESTED_VERSION" = "latest" ]; then
+          echo "📥 Fetching latest ccl-test-data release info..."
+          TARGET_VERSION=$(curl -sL "https://api.github.com/repos/$REPO/releases/latest" | jq -r '.tag_name')
+        else
+          TARGET_VERSION="$REQUESTED_VERSION"
+        fi
+
+        if [ -z "$TARGET_VERSION" ] || [ "$TARGET_VERSION" = "null" ]; then
+          echo "::error::Failed to resolve ccl-test-data release version"
+          exit 1
+        fi
+
+        echo "version=$TARGET_VERSION" >> "$GITHUB_OUTPUT"
+        echo "Resolved version: $TARGET_VERSION"
+
+    - name: Cache CCL test data
+      if: inputs.force != 'true'
+      id: cache
+      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # ratchet:actions/cache@v4
+      with:
+        path: ${{ inputs.output-dir }}
+        key: ccl-test-data-${{ steps.resolve.outputs.version }}
+
+    - name: Download CCL test data
+      if: inputs.force == 'true' || steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        TARGET_VERSION: ${{ steps.resolve.outputs.version }}
+        REQUESTED_VERSION: ${{ inputs.version }}
+        OUTPUT_DIR: ${{ inputs.output-dir }}
+      run: |
+        REPO="CatConfLang/ccl-test-data"
+
+        mkdir -p "$OUTPUT_DIR"
+
+        echo "📥 Downloading CCL test data $TARGET_VERSION..."
+
+        # Fetch release info for the target version
+        if [ "$REQUESTED_VERSION" = "latest" ]; then
+          RELEASE_URL="https://api.github.com/repos/$REPO/releases/latest"
+        else
+          RELEASE_URL="https://api.github.com/repos/$REPO/releases/tags/$TARGET_VERSION"
+        fi
+
+        ZIP_URL=$(curl -sL "$RELEASE_URL" | \
+          jq -r '.assets[] | select(.name | contains("generated")) | .browser_download_url')
+
+        if [ -z "$ZIP_URL" ] || [ "$ZIP_URL" = "null" ]; then
+          echo "::error::No generated test data asset found for $TARGET_VERSION"
+          exit 1
+        fi
+
+        # Download and extract
+        TEMP_DIR=$(mktemp -d)
+        trap "rm -rf $TEMP_DIR" EXIT
+
+        echo "Downloading $ZIP_URL..."
+        curl -sL "$ZIP_URL" -o "$TEMP_DIR/generated-tests.zip"
+        echo "Extracting test files..."
+        unzip -q "$TEMP_DIR/generated-tests.zip" -d "$TEMP_DIR/"
+
+        # Copy JSON files to output directory
+        find "$TEMP_DIR" -name "*.json" -exec cp {} "$OUTPUT_DIR/" \;
+
+        # Record the downloaded version
+        echo "$TARGET_VERSION" > "$OUTPUT_DIR/.version"
+
+        echo "✅ CCL test data $TARGET_VERSION downloaded to $OUTPUT_DIR/"
