@@ -1,5 +1,5 @@
 name: 'Download CCL Test Data'
-description: 'Download ccl-test-data from CatConfLang/ccl-test-data GitHub releases with version tracking'
+description: 'Download ccl-test-data from CatConfLang/ccl-test-data GitHub releases with caching and version tracking'
 
 inputs:
   version:
@@ -18,19 +18,13 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Download CCL test data
+    - name: Resolve CCL test data version
+      id: resolve
       shell: bash
       env:
         REQUESTED_VERSION: ${{ inputs.version }}
-        FORCE: ${{ inputs.force }}
-        OUTPUT_DIR: ${{ inputs.output-dir }}
       run: |
-        VERSION_FILE="$OUTPUT_DIR/.version"
         REPO="CatConfLang/ccl-test-data"
-
-        mkdir -p "$OUTPUT_DIR"
-
-        # Resolve the target version
         if [ "$REQUESTED_VERSION" = "latest" ]; then
           echo "📥 Fetching latest ccl-test-data release info..."
           TARGET_VERSION=$(curl -sL "https://api.github.com/repos/$REPO/releases/latest" | jq -r '.tag_name')
@@ -43,17 +37,30 @@ runs:
           exit 1
         fi
 
-        # Check if already up-to-date
-        if [ "$FORCE" != "true" ] && [ -f "$VERSION_FILE" ]; then
-          CURRENT_VERSION=$(cat "$VERSION_FILE")
-          if [ "$CURRENT_VERSION" = "$TARGET_VERSION" ]; then
-            echo "✅ CCL test data already at $TARGET_VERSION"
-            exit 0
-          fi
-          echo "📥 Updating CCL test data from $CURRENT_VERSION to $TARGET_VERSION..."
-        else
-          echo "📥 Downloading CCL test data $TARGET_VERSION..."
-        fi
+        echo "version=$TARGET_VERSION" >> "$GITHUB_OUTPUT"
+        echo "Resolved version: $TARGET_VERSION"
+
+    - name: Cache CCL test data
+      if: inputs.force != 'true'
+      id: cache
+      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # ratchet:actions/cache@v4
+      with:
+        path: ${{ inputs.output-dir }}
+        key: ccl-test-data-${{ steps.resolve.outputs.version }}
+
+    - name: Download CCL test data
+      if: inputs.force == 'true' || steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        TARGET_VERSION: ${{ steps.resolve.outputs.version }}
+        REQUESTED_VERSION: ${{ inputs.version }}
+        OUTPUT_DIR: ${{ inputs.output-dir }}
+      run: |
+        REPO="CatConfLang/ccl-test-data"
+
+        mkdir -p "$OUTPUT_DIR"
+
+        echo "📥 Downloading CCL test data $TARGET_VERSION..."
 
         # Fetch release info for the target version
         if [ "$REQUESTED_VERSION" = "latest" ]; then
@@ -83,6 +90,6 @@ runs:
         find "$TEMP_DIR" -name "*.json" -exec cp {} "$OUTPUT_DIR/" \;
 
         # Record the downloaded version
-        echo "$TARGET_VERSION" > "$VERSION_FILE"
+        echo "$TARGET_VERSION" > "$OUTPUT_DIR/.version"
 
         echo "✅ CCL test data $TARGET_VERSION downloaded to $OUTPUT_DIR/"
