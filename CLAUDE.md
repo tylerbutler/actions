@@ -17,6 +17,7 @@ Reusable composite actions for CI/CD workflows. Used across multiple repositorie
 | `changie-auto-tag` | Create version tag(s) from latest changie release (single or multi-project) |
 | `changie-check` | Detect PR-added changie fragments and render preview |
 | `binary-size` | Measure binary file sizes and report deltas vs baseline |
+| `download-ccl-tests` | Download CCL test data from CatConfLang/ccl-test-data releases |
 
 ## Usage Pattern
 
@@ -49,6 +50,8 @@ actions/
 │   └── action.yml      # PR changelog detection
 ├── binary-size/
 │   └── action.yml      # Binary file size reporting
+├── download-ccl-tests/
+│   └── action.yml      # CCL test data download
 ├── README.md           # User documentation
 └── LICENSE
 ```
