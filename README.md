@@ -518,8 +518,9 @@ jobs:
 1. Parses `workspace.toml` using Python's `tomllib` (stdlib, zero dependencies)
 2. Expands glob patterns in `members`, filters to directories containing `gleam.toml`
 3. Applies `exclude` patterns
-4. Reads `name` and `version` from each package's `gleam.toml`
-5. Outputs structured data for downstream action consumption
+4. Reads `name`, `version`, and `dependencies` from each package's `gleam.toml`
+5. Topologically sorts packages by intra-workspace dependencies (dependencies come before dependents), so `packages` output is always in safe publish order
+6. Outputs structured data for downstream action consumption
 
 ### gleam-publish
 

@@ -179,7 +179,7 @@ Both actions are fully backward compatible:
 - In multi-project mode, the branch name template replaces `{version}` with `next` instead of the version string, since comma-separated versions aren't valid branch names
 
 - `gleam-publish` supports `replace-path-deps` input to rewrite path dependencies to Hex version ranges before publishing. Format: `dep-name:version-toml-path` per line. Reads version from the specified TOML file and generates a `">= X.Y.Z and < (X+1).0.0"` range (or `< 0.(Y+1).0` for pre-1.0). Essential for monorepos where sub-packages use `{ path = "..." }` deps during development
-- `read-gleam-workspace` parses `workspace.toml` with `[workspace]` section containing `members` (glob-enabled) and `exclude` arrays. Uses Python `tomllib` (stdlib). Outputs: `packages` (space-separated paths), `projects` (comma-separated names), `version-files` (changie format), `packages-json` (JSON), `cache-hash-globs` (for hashFiles)
+- `read-gleam-workspace` parses `workspace.toml` with `[workspace]` section containing `members` (glob-enabled) and `exclude` arrays. Uses Python `tomllib` (stdlib). Topologically sorts packages by intra-workspace dependencies so output order is safe for publishing. Outputs: `packages` (space-separated paths), `projects` (comma-separated names), `version-files` (changie format), `packages-json` (JSON), `cache-hash-globs` (for hashFiles)
 
 ## Workspace File Format
 

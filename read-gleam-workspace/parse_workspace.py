@@ -2,8 +2,9 @@
 """Parse a Gleam workspace.toml and output structured package metadata.
 
 Reads a workspace config with glob-enabled member patterns, resolves them
-against the filesystem, and writes structured outputs for GitHub Actions
-consumption (or prints them to stdout when GITHUB_OUTPUT is not set).
+against the filesystem, topologically sorts by intra-workspace dependencies,
+and writes structured outputs for GitHub Actions consumption (or prints them
+to stdout when GITHUB_OUTPUT is not set).
 
 Environment variables:
     WORKSPACE_FILE  Path to workspace.toml (required)
@@ -15,10 +16,11 @@ import json
 import os
 import sys
 import tomllib
+from collections import deque
 
 
 def parse_workspace(workspace_file: str) -> list[dict]:
-    """Parse workspace.toml and return a list of package metadata dicts."""
+    """Parse workspace.toml and return a topologically sorted list of package metadata."""
     with open(workspace_file, "rb") as f:
         config = tomllib.load(f)
 
@@ -58,7 +60,7 @@ def parse_workspace(workspace_file: str) -> list[dict]:
         print("::error::No packages found after expanding workspace members")
         sys.exit(1)
 
-    # Read name and version from each gleam.toml
+    # Read name, version, and dependencies from each gleam.toml
     packages: list[dict] = []
     for pkg_path in expanded:
         toml_path = (
@@ -68,12 +70,66 @@ def parse_workspace(workspace_file: str) -> list[dict]:
             pkg_config = tomllib.load(f)
         name = pkg_config.get("name", "")
         version = pkg_config.get("version", "")
+        deps = list(pkg_config.get("dependencies", {}).keys())
         if not name:
             print(f"::warning::No 'name' in {toml_path}, skipping")
             continue
-        packages.append({"name": name, "path": pkg_path, "version": version})
+        packages.append({
+            "name": name,
+            "path": pkg_path,
+            "version": version,
+            "deps": deps,
+        })
+
+    packages = _topo_sort(packages)
+
+    # Strip internal deps field from output
+    for p in packages:
+        del p["deps"]
 
     return packages
+
+
+def _topo_sort(packages: list[dict]) -> list[dict]:
+    """Topologically sort packages by intra-workspace dependencies (Kahn's algorithm).
+
+    Only considers dependencies between workspace members. External deps are ignored.
+    Packages with no intra-workspace dependencies come first. Among packages at the
+    same depth, the original discovery order is preserved for stability.
+    """
+    ws_names = {p["name"] for p in packages}
+    by_name = {p["name"]: p for p in packages}
+
+    # Build adjacency: edges point from dependency → dependent
+    in_degree: dict[str, int] = {p["name"]: 0 for p in packages}
+    dependents: dict[str, list[str]] = {p["name"]: [] for p in packages}
+
+    for p in packages:
+        for dep in p["deps"]:
+            if dep in ws_names:
+                in_degree[p["name"]] += 1
+                dependents[dep].append(p["name"])
+
+    # Seed queue with packages that have no intra-workspace deps, in original order
+    queue: deque[str] = deque(
+        p["name"] for p in packages if in_degree[p["name"]] == 0
+    )
+    sorted_pkgs: list[dict] = []
+
+    while queue:
+        name = queue.popleft()
+        sorted_pkgs.append(by_name[name])
+        for dep_name in dependents[name]:
+            in_degree[dep_name] -= 1
+            if in_degree[dep_name] == 0:
+                queue.append(dep_name)
+
+    if len(sorted_pkgs) != len(packages):
+        cycle_members = [p["name"] for p in packages if in_degree[p["name"]] > 0]
+        print(f"::error::Circular dependency detected among: {', '.join(cycle_members)}")
+        sys.exit(1)
+
+    return sorted_pkgs
 
 
 def build_outputs(packages: list[dict]) -> dict[str, str]:
