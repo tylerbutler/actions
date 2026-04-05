@@ -1,0 +1,46 @@
+name: 'Read Gleam Workspace'
+description: 'Parse workspace.toml and output structured package metadata for other actions'
+
+inputs:
+  working-directory:
+    description: 'Repository root directory'
+    required: false
+    default: '.'
+  workspace-file:
+    description: 'Path to workspace config file (relative to working-directory)'
+    required: false
+    default: 'workspace.toml'
+
+outputs:
+  packages:
+    description: 'Space-separated package paths in declared order (for gleam-publish)'
+    value: ${{ steps.parse.outputs.packages }}
+  projects:
+    description: 'Comma-separated package names (for changie-release, auto-tag)'
+    value: ${{ steps.parse.outputs.projects }}
+  version-files:
+    description: 'Newline-separated name:path/gleam.toml:version entries (for changie-release)'
+    value: ${{ steps.parse.outputs.version-files }}
+  packages-json:
+    description: 'JSON array of {name, path, version} objects'
+    value: ${{ steps.parse.outputs.packages-json }}
+  cache-hash-globs:
+    description: 'Comma-separated gleam.toml and manifest.toml paths for cache hashFiles()'
+    value: ${{ steps.parse.outputs.cache-hash-globs }}
+
+runs:
+  using: composite
+  steps:
+    - name: Parse workspace
+      id: parse
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        WORKSPACE_FILE: ${{ inputs.workspace-file }}
+      run: |
+        if [ ! -f "$WORKSPACE_FILE" ]; then
+          echo "::error::Workspace file not found: $WORKSPACE_FILE"
+          exit 1
+        fi
+
+        python3 "$GITHUB_ACTION_PATH/parse_workspace.py"

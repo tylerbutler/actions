@@ -62,7 +62,7 @@ jobs:
 
 **Example (Gleam monorepo with multiple packages):**
 
-For monorepos, disable the built-in cache and add your own `actions/cache` step with the correct `hashFiles()` patterns:
+For monorepos, disable the built-in cache and add your own `actions/cache` step with the correct `hashFiles()` patterns. If the root directory is also a publishable package, include its `gleam.toml` and `manifest.toml` in the hash:
 
 ```yaml
 jobs:
@@ -80,7 +80,7 @@ jobs:
           path: |
             build/packages
             ~/.cache/gleam
-          key: gleam-${{ runner.os }}-${{ hashFiles('packages/*/gleam.toml', 'packages/*/manifest.toml') }}
+          key: gleam-${{ runner.os }}-${{ hashFiles('gleam.toml', 'manifest.toml', 'packages/*/gleam.toml', 'packages/*/manifest.toml') }}
           restore-keys: gleam-${{ runner.os }}-
 
       - run: just test
@@ -249,6 +249,7 @@ Batch [changie](https://changie.dev/) changelog entries and create a release pul
 | `base` | *(checked-out branch)* | Base branch for the PR |
 | `delete-branch` | `true` | Delete branch after merge |
 | `version-files` | `''` | TOML files to bump with the release version (see below) |
+| `post-batch-command` | `''` | Shell command to run after version bumps, before PR creation (see below) |
 
 **Version file bumping:**
 
@@ -262,6 +263,32 @@ The `version-files` input accepts a newline-separated list of `path:key` pairs p
 ```
 
 This replaces `version = "..."` in `gleam.toml` with the new version. The change is included in the same commit as the changelog update — no extra git operations needed.
+
+**Post-batch command:**
+
+The `post-batch-command` input runs a shell command after changelog batching and version file bumping, but before the release PR commit is created. Any file changes made by this command are included in the release PR. This is useful for refreshing lockfiles or running code generation that depends on the new version.
+
+```yaml
+- uses: tylerbutler/actions/changie-release@main
+  with:
+    version-files: |
+      gleam.toml:version
+    post-batch-command: 'gleam deps download'
+```
+
+**Example (Gleam monorepo with lockfile refresh):**
+
+```yaml
+- uses: tylerbutler/actions/changie-release@main
+  with:
+    projects: my_lib,my_lib_plugin
+    version-files: |
+      my_lib:gleam.toml:version
+      my_lib_plugin:packages/my_lib_plugin/gleam.toml:version
+    post-batch-command: |
+      gleam deps download
+      for d in packages/*/; do (cd "$d" && gleam deps download); done
+```
 
 **Outputs:**
 
@@ -410,6 +437,91 @@ jobs:
             This PR has commits (`${{ steps.changelog.outputs.commit-types-found }}`) that typically require a changelog entry. Run `changie new` to add one.
 ```
 
+### read-gleam-workspace
+
+Parse a `workspace.toml` file and output structured package metadata for other actions. Designed as a "pre-step" that generates inputs for `gleam-publish`, `changie-release`, and `auto-tag` from a single source of truth.
+
+```yaml
+- uses: tylerbutler/actions/read-gleam-workspace@v1
+  id: ws
+```
+
+**Workspace file format (`workspace.toml`):**
+
+```toml
+[workspace]
+members = [".", "packages/my_lib_*"]
+exclude = ["packages/my_lib_experimental"]
+```
+
+- **members** — Glob patterns or literal paths to package directories. Order is preserved: literal paths stay in declared order, glob matches are sorted alphabetically. Each matched directory must contain a `gleam.toml`.
+- **exclude** — Patterns to remove from the expanded member list (optional). Supports globs.
+
+**Inputs:**
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `working-directory` | `.` | Repository root directory |
+| `workspace-file` | `workspace.toml` | Path to workspace config (relative to working-directory) |
+
+**Outputs:**
+
+| Output | Description |
+|--------|-------------|
+| `packages` | Space-separated package paths in order (for `gleam-publish`) |
+| `projects` | Comma-separated package names (for `changie-release`, `auto-tag`) |
+| `version-files` | Newline-separated `name:path/gleam.toml:version` entries (for `changie-release`) |
+| `packages-json` | JSON array of `{name, path, version}` objects |
+| `cache-hash-globs` | Comma-separated paths for `hashFiles()` in cache keys |
+
+**Example (full publish workflow using workspace):**
+
+```yaml
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: tylerbutler/actions/read-gleam-workspace@v1
+        id: ws
+      - uses: tylerbutler/actions/setup-gleam@v1
+        with:
+          cache: 'false'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            build/packages
+            ~/.cache/gleam
+          key: gleam-${{ runner.os }}-${{ hashFiles(steps.ws.outputs.cache-hash-globs) }}
+          restore-keys: gleam-${{ runner.os }}-
+      - uses: tylerbutler/actions/gleam-publish@v1
+        with:
+          packages: ${{ steps.ws.outputs.packages }}
+          replace-path-deps: |
+            my_lib:gleam.toml
+          hex-api-key: ${{ secrets.HEXPM_API_KEY }}
+```
+
+**Example (release workflow using workspace):**
+
+```yaml
+- uses: tylerbutler/actions/read-gleam-workspace@v1
+  id: ws
+- uses: tylerbutler/actions/changie-release@v1
+  with:
+    projects: ${{ steps.ws.outputs.projects }}
+    version-files: ${{ steps.ws.outputs.version-files }}
+```
+
+**How it works:**
+
+1. Parses `workspace.toml` using Python's `tomllib` (stdlib, zero dependencies)
+2. Expands glob patterns in `members`, filters to directories containing `gleam.toml`
+3. Applies `exclude` patterns
+4. Reads `name`, `version`, and `dependencies` from each package's `gleam.toml`
+5. Topologically sorts packages by intra-workspace dependencies (dependencies come before dependents), so `packages` output is always in safe publish order
+6. Outputs structured data for downstream action consumption
+
 ### gleam-publish
 
 Publish Gleam packages to [Hex.pm](https://hex.pm/) in dependency order. Designed for monorepos with multiple Gleam packages — publishes each package sequentially and gracefully skips versions that are already on Hex.
@@ -425,10 +537,33 @@ Publish Gleam packages to [Hex.pm](https://hex.pm/) in dependency order. Designe
 
 | Input | Default | Description |
 |-------|---------|-------------|
-| `packages` | *(required)* | Space-separated package directories in dependency (publish) order |
+| `packages` | *(required)* | Space-separated package directories in dependency (publish) order. Use `.` for the root package. |
 | `working-directory` | `.` | Root directory of the repository |
 | `hex-api-key` | *(required)* | Hex.pm API key for authentication |
 | `skip-already-published` | `true` | Skip (instead of fail) when a version is already on Hex |
+| `replace-path-deps` | `''` | Rewrite path deps to Hex version ranges before publishing (see below) |
+
+**Path dependency rewriting:**
+
+In Gleam monorepos, sub-packages often depend on a root or sibling package via `path` dependencies (e.g., `my_lib = { path = "../.." }`). Hex.pm rejects path dependencies, so they must be rewritten to version ranges before publishing.
+
+The `replace-path-deps` input automates this. It accepts newline-separated entries in the format `dep-name:version-toml-path`:
+
+```yaml
+- uses: tylerbutler/actions/gleam-publish@v1
+  with:
+    packages: >-
+      .
+      packages/my_lib_apple
+      packages/my_lib_google
+    replace-path-deps: |
+      my_lib:gleam.toml
+    hex-api-key: ${{ secrets.HEXPM_API_KEY }}
+```
+
+This reads `my_lib`'s version from the root `gleam.toml`, then rewrites any `my_lib = { path = "..." }` entries in sub-packages to a semver-compatible Hex version range before publishing:
+- **Pre-1.0** (e.g., `0.3.0`): `my_lib = ">= 0.3.0 and < 0.4.0"`
+- **Post-1.0** (e.g., `2.1.0`): `my_lib = ">= 2.1.0 and < 3.0.0"`
 
 **Outputs:**
 
@@ -437,7 +572,26 @@ Publish Gleam packages to [Hex.pm](https://hex.pm/) in dependency order. Designe
 | `published` | Space-separated list of packages that were successfully published |
 | `skipped` | Space-separated list of packages skipped (already published) |
 
-**Example (monorepo with ordered packages):**
+**Example (monorepo with root package and path dep rewriting using workspace):**
+
+```yaml
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: tylerbutler/actions/read-gleam-workspace@v1
+        id: ws
+      - uses: tylerbutler/actions/setup-gleam@v1
+      - uses: tylerbutler/actions/gleam-publish@v1
+        with:
+          packages: ${{ steps.ws.outputs.packages }}
+          replace-path-deps: |
+            my_lib:gleam.toml
+          hex-api-key: ${{ secrets.HEXPM_API_KEY }}
+```
+
+**Example (monorepo with ordered sub-packages only):**
 
 ```yaml
 jobs:
@@ -469,11 +623,12 @@ jobs:
 
 **How it works:**
 
-1. Iterates through packages in the specified order (dependency order matters!)
-2. Reads package name and version from each `gleam.toml`
-3. Runs `gleam publish --yes` in each package directory
-4. If a version is already on Hex and `skip-already-published` is true, skips gracefully
-5. Writes a summary of published/skipped/failed packages to the GitHub Step Summary
+1. If `replace-path-deps` is set, rewrites path dependencies to Hex version ranges in all listed packages
+2. Iterates through packages in the specified order (dependency order matters!)
+3. Reads package name and version from each `gleam.toml`
+4. Runs `gleam publish --yes` in each package directory
+5. If a version is already on Hex and `skip-already-published` is true, skips gracefully
+6. Writes a summary of published/skipped/failed packages to the GitHub Step Summary
 
 ## Reusable Workflows
 
