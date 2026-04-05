@@ -25,15 +25,18 @@ inputs:
       Newline-separated entries in the format: `dep-name:version-toml-path`
 
       For each entry, any package with a path dependency on `dep-name` will have it
-      replaced with a Hex version range `">= X.Y.Z and < (X+1).0.0"` where X.Y.Z is
-      read from the `version` key in the TOML file at `version-toml-path` (relative to
-      working-directory).
+      replaced with a semver-compatible Hex version range read from the `version` key
+      in the TOML file at `version-toml-path` (relative to working-directory).
+
+      Version range logic follows semver conventions:
+        - Pre-1.0 (0.x.y): `">= 0.x.y and < 0.(x+1).0"` (minor is breaking)
+        - Post-1.0 (x.y.z): `">= x.y.z and < (x+1).0.0"` (major is breaking)
 
       Example:
         vestibule:gleam.toml
       This reads the version from the root gleam.toml and rewrites
-      `vestibule = { path = "..." }` to `vestibule = ">= 0.1.0 and < 1.0.0"` in all
-      sub-packages before publishing.
+      `vestibule = { path = "..." }` to a Hex version range in all sub-packages
+      before publishing.
     required: false
     default: ''
 
@@ -68,8 +71,17 @@ runs:
 
           dep_version=$(grep '^version' "$version_toml" | head -1 | sed 's/version = "\(.*\)"/\1/')
           major=$(echo "$dep_version" | cut -d. -f1)
-          next_major=$((major + 1))
-          hex_range=">= $dep_version and < $next_major.0.0"
+          minor=$(echo "$dep_version" | cut -d. -f2)
+
+          if [ "$major" -eq 0 ]; then
+            # Pre-1.0: minor version is the compatibility boundary
+            next_minor=$((minor + 1))
+            hex_range=">= $dep_version and < 0.$next_minor.0"
+          else
+            # Post-1.0: major version is the compatibility boundary
+            next_major=$((major + 1))
+            hex_range=">= $dep_version and < $next_major.0.0"
+          fi
 
           echo "Dependency $dep_name: version $dep_version → \"$hex_range\""
 

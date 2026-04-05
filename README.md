@@ -476,7 +476,9 @@ The `replace-path-deps` input automates this. It accepts newline-separated entri
     hex-api-key: ${{ secrets.HEXPM_API_KEY }}
 ```
 
-This reads `my_lib`'s version from the root `gleam.toml`, then rewrites any `my_lib = { path = "..." }` entries in sub-packages to `my_lib = ">= X.Y.Z and < (X+1).0.0"` before publishing.
+This reads `my_lib`'s version from the root `gleam.toml`, then rewrites any `my_lib = { path = "..." }` entries in sub-packages to a semver-compatible Hex version range before publishing:
+- **Pre-1.0** (e.g., `0.3.0`): `my_lib = ">= 0.3.0 and < 0.4.0"`
+- **Post-1.0** (e.g., `2.1.0`): `my_lib = ">= 2.1.0 and < 3.0.0"`
 
 **Outputs:**
 
