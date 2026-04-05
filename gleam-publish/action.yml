@@ -1,0 +1,97 @@
+name: 'Gleam Publish'
+description: 'Publish Gleam packages to Hex.pm in dependency order, skipping already-published versions'
+
+inputs:
+  packages:
+    description: |
+      Space-separated list of package directories to publish, in dependency order.
+      Each entry is a path relative to working-directory.
+      Example: `packages/core packages/utils packages/main`
+    required: true
+  working-directory:
+    description: 'Root directory of the repository'
+    required: false
+    default: '.'
+  hex-api-key:
+    description: 'Hex.pm API key for authentication'
+    required: true
+  skip-already-published:
+    description: 'Skip (instead of fail) when a package version is already published on Hex'
+    required: false
+    default: 'true'
+
+outputs:
+  published:
+    description: 'Space-separated list of packages that were successfully published'
+    value: ${{ steps.publish.outputs.published }}
+  skipped:
+    description: 'Space-separated list of packages that were skipped (already published)'
+    value: ${{ steps.publish.outputs.skipped }}
+
+runs:
+  using: composite
+  steps:
+    - name: Publish packages
+      id: publish
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        HEXPM_API_KEY: ${{ inputs.hex-api-key }}
+        PACKAGES: ${{ inputs.packages }}
+        SKIP_PUBLISHED: ${{ inputs.skip-already-published }}
+      run: |
+        PUBLISHED=""
+        SKIPPED=""
+        FAILED=""
+
+        for pkg_dir in $PACKAGES; do
+          if [ ! -d "$pkg_dir" ]; then
+            echo "::error::Package directory not found: $pkg_dir"
+            FAILED="${FAILED:+$FAILED }$pkg_dir"
+            continue
+          fi
+
+          # Extract package name and version from gleam.toml
+          pkg_name=$(grep '^name' "$pkg_dir/gleam.toml" | head -1 | sed 's/name = "\(.*\)"/\1/')
+          pkg_version=$(grep '^version' "$pkg_dir/gleam.toml" | head -1 | sed 's/version = "\(.*\)"/\1/')
+          echo "::group::$pkg_name@$pkg_version ($pkg_dir)"
+
+          # Attempt to publish
+          pushd "$pkg_dir" > /dev/null
+          if output=$(gleam publish --yes 2>&1); then
+            echo "$output"
+            echo "✓ Published $pkg_name@$pkg_version"
+            PUBLISHED="${PUBLISHED:+$PUBLISHED }$pkg_dir"
+          else
+            if echo "$output" | grep -qi "already published\|already exists\|version already"; then
+              echo "$output"
+              if [ "$SKIP_PUBLISHED" = "true" ]; then
+                echo "· Skipped $pkg_name@$pkg_version (already published)"
+                SKIPPED="${SKIPPED:+$SKIPPED }$pkg_dir"
+              else
+                echo "::error::$pkg_name@$pkg_version is already published"
+                FAILED="${FAILED:+$FAILED }$pkg_dir"
+              fi
+            else
+              echo "$output"
+              echo "::error::Failed to publish $pkg_name@$pkg_version"
+              FAILED="${FAILED:+$FAILED }$pkg_dir"
+            fi
+          fi
+          popd > /dev/null
+          echo "::endgroup::"
+        done
+
+        echo "published=$PUBLISHED" >> "$GITHUB_OUTPUT"
+        echo "skipped=$SKIPPED" >> "$GITHUB_OUTPUT"
+
+        # Summary
+        echo "### Publish Results" >> "$GITHUB_STEP_SUMMARY"
+        [ -n "$PUBLISHED" ] && echo "- **Published:** $PUBLISHED" >> "$GITHUB_STEP_SUMMARY"
+        [ -n "$SKIPPED" ] && echo "- **Skipped:** $SKIPPED" >> "$GITHUB_STEP_SUMMARY"
+        [ -n "$FAILED" ] && echo "- **Failed:** $FAILED" >> "$GITHUB_STEP_SUMMARY"
+
+        if [ -n "$FAILED" ]; then
+          echo "::error::Some packages failed to publish: $FAILED"
+          exit 1
+        fi

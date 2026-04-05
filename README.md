@@ -384,6 +384,71 @@ jobs:
             This PR has commits (`${{ steps.changelog.outputs.commit-types-found }}`) that typically require a changelog entry. Run `changie new` to add one.
 ```
 
+### gleam-publish
+
+Publish Gleam packages to [Hex.pm](https://hex.pm/) in dependency order. Designed for monorepos with multiple Gleam packages — publishes each package sequentially and gracefully skips versions that are already on Hex.
+
+```yaml
+- uses: tylerbutler/actions/gleam-publish@v1
+  with:
+    packages: 'packages/core packages/utils packages/main'
+    hex-api-key: ${{ secrets.HEXPM_API_KEY }}
+```
+
+**Inputs:**
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `packages` | *(required)* | Space-separated package directories in dependency (publish) order |
+| `working-directory` | `.` | Root directory of the repository |
+| `hex-api-key` | *(required)* | Hex.pm API key for authentication |
+| `skip-already-published` | `true` | Skip (instead of fail) when a version is already on Hex |
+
+**Outputs:**
+
+| Output | Description |
+|--------|-------------|
+| `published` | Space-separated list of packages that were successfully published |
+| `skipped` | Space-separated list of packages skipped (already published) |
+
+**Example (monorepo with ordered packages):**
+
+```yaml
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: tylerbutler/actions/setup-gleam@v1
+      - uses: tylerbutler/actions/gleam-publish@v1
+        with:
+          packages: >-
+            packages/core
+            packages/counters
+            packages/sets
+            packages/registers
+            packages/maps
+            packages/umbrella
+          hex-api-key: ${{ secrets.HEXPM_API_KEY }}
+```
+
+**Example (single package):**
+
+```yaml
+- uses: tylerbutler/actions/gleam-publish@v1
+  with:
+    packages: '.'
+    hex-api-key: ${{ secrets.HEXPM_API_KEY }}
+```
+
+**How it works:**
+
+1. Iterates through packages in the specified order (dependency order matters!)
+2. Reads package name and version from each `gleam.toml`
+3. Runs `gleam publish --yes` in each package directory
+4. If a version is already on Hex and `skip-already-published` is true, skips gracefully
+5. Writes a summary of published/skipped/failed packages to the GitHub Step Summary
+
 ## Reusable Workflows
 
 ### auto-tag
