@@ -50,14 +50,6 @@ inputs:
     description: 'Whether to run gleam deps download (or just deps if justfile exists)'
     required: false
     default: 'true'
-  cache-hash-files:
-    description: |
-      File patterns for cache key generation, comma-separated.
-      Passed directly to hashFiles(). Supports glob patterns.
-      Default: `{working-directory}/gleam.toml,{working-directory}/manifest.toml`
-      Monorepo example: `packages/*/gleam.toml,packages/*/manifest.toml`
-    required: false
-    default: ''
 
 runs:
   using: composite
@@ -97,20 +89,6 @@ runs:
       with:
         node-version: ${{ inputs.node-version }}
 
-    - name: Resolve cache hash files
-      if: inputs.cache == 'true'
-      id: cache-key
-      shell: bash
-      run: |
-        if [ -n "$CUSTOM" ]; then
-          echo "files=$CUSTOM" >> "$GITHUB_OUTPUT"
-        else
-          echo "files=$WD/gleam.toml,$WD/manifest.toml" >> "$GITHUB_OUTPUT"
-        fi
-      env:
-        CUSTOM: ${{ inputs.cache-hash-files }}
-        WD: ${{ inputs.working-directory }}
-
     - name: Cache Gleam dependencies
       if: inputs.cache == 'true'
       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # ratchet:actions/cache@v4
@@ -118,7 +96,7 @@ runs:
         path: |
           ${{ inputs.working-directory }}/build/packages
           ~/.cache/gleam
-        key: gleam-${{ runner.os }}-${{ hashFiles(steps.cache-key.outputs.files) }}
+        key: gleam-${{ runner.os }}-${{ hashFiles(format('{0}/gleam.toml', inputs.working-directory), format('{0}/manifest.toml', inputs.working-directory)) }}
         restore-keys: |
           gleam-${{ runner.os }}-
 
