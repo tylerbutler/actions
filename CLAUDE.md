@@ -16,6 +16,7 @@ Reusable composite actions for CI/CD workflows. Used across multiple repositorie
 | `changie-release` | Batch changie entries and create release PR (single or multi-project) |
 | `changie-auto-tag` | Create version tag(s) from latest changie release (single or multi-project) |
 | `changie-check` | Detect PR-added changie fragments and render preview |
+| `gleam-publish` | Publish Gleam packages to Hex.pm in dependency order |
 | `binary-size` | Measure binary file sizes and report deltas vs baseline |
 | `download-ccl-tests` | Download CCL test data from CatConfLang/ccl-test-data releases |
 
@@ -48,6 +49,8 @@ actions/
 │   └── action.yml      # Version tag from changie
 ├── changie-check/
 │   └── action.yml      # PR changelog detection
+├── gleam-publish/
+│   └── action.yml      # Publish Gleam packages to Hex.pm
 ├── binary-size/
 │   └── action.yml      # Binary file size reporting
 ├── download-ccl-tests/
