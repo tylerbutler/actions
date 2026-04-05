@@ -30,6 +30,7 @@ Setup Gleam/BEAM environment with caching, optional Elixir, and optional JavaScr
 | `working-directory` | `.` | Working directory |
 | `install-just` | `true` | Install just task runner |
 | `run-deps` | `true` | Run dependency download |
+| `cache-hash-files` | `''` | Override cache key file patterns (comma-separated globs, for monorepos) |
 
 **Example (Gleam only):**
 
@@ -58,6 +59,20 @@ jobs:
           elixir-version: '1.18.4'
           working-directory: server
       - run: just test-server
+```
+
+**Example (Gleam monorepo with multiple packages):**
+
+```yaml
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: tylerbutler/actions/setup-gleam@v1
+        with:
+          cache-hash-files: 'packages/*/gleam.toml,packages/*/manifest.toml'
+      - run: just test
 ```
 
 ### setup-rust
