@@ -437,6 +437,90 @@ jobs:
             This PR has commits (`${{ steps.changelog.outputs.commit-types-found }}`) that typically require a changelog entry. Run `changie new` to add one.
 ```
 
+### read-gleam-workspace
+
+Parse a `workspace.toml` file and output structured package metadata for other actions. Designed as a "pre-step" that generates inputs for `gleam-publish`, `changie-release`, and `auto-tag` from a single source of truth.
+
+```yaml
+- uses: tylerbutler/actions/read-gleam-workspace@v1
+  id: ws
+```
+
+**Workspace file format (`workspace.toml`):**
+
+```toml
+[workspace]
+members = [".", "packages/my_lib_*"]
+exclude = ["packages/my_lib_experimental"]
+```
+
+- **members** — Glob patterns or literal paths to package directories. Order is preserved: literal paths stay in declared order, glob matches are sorted alphabetically. Each matched directory must contain a `gleam.toml`.
+- **exclude** — Patterns to remove from the expanded member list (optional). Supports globs.
+
+**Inputs:**
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `working-directory` | `.` | Repository root directory |
+| `workspace-file` | `workspace.toml` | Path to workspace config (relative to working-directory) |
+
+**Outputs:**
+
+| Output | Description |
+|--------|-------------|
+| `packages` | Space-separated package paths in order (for `gleam-publish`) |
+| `projects` | Comma-separated package names (for `changie-release`, `auto-tag`) |
+| `version-files` | Newline-separated `name:path/gleam.toml:version` entries (for `changie-release`) |
+| `packages-json` | JSON array of `{name, path, version}` objects |
+| `cache-hash-globs` | Comma-separated paths for `hashFiles()` in cache keys |
+
+**Example (full publish workflow using workspace):**
+
+```yaml
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: tylerbutler/actions/read-gleam-workspace@v1
+        id: ws
+      - uses: tylerbutler/actions/setup-gleam@v1
+        with:
+          cache: 'false'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            build/packages
+            ~/.cache/gleam
+          key: gleam-${{ runner.os }}-${{ hashFiles(steps.ws.outputs.cache-hash-globs) }}
+          restore-keys: gleam-${{ runner.os }}-
+      - uses: tylerbutler/actions/gleam-publish@v1
+        with:
+          packages: ${{ steps.ws.outputs.packages }}
+          replace-path-deps: |
+            my_lib:gleam.toml
+          hex-api-key: ${{ secrets.HEXPM_API_KEY }}
+```
+
+**Example (release workflow using workspace):**
+
+```yaml
+- uses: tylerbutler/actions/read-gleam-workspace@v1
+  id: ws
+- uses: tylerbutler/actions/changie-release@v1
+  with:
+    projects: ${{ steps.ws.outputs.projects }}
+    version-files: ${{ steps.ws.outputs.version-files }}
+```
+
+**How it works:**
+
+1. Parses `workspace.toml` using Python's `tomllib` (stdlib, zero dependencies)
+2. Expands glob patterns in `members`, filters to directories containing `gleam.toml`
+3. Applies `exclude` patterns
+4. Reads `name` and `version` from each package's `gleam.toml`
+5. Outputs structured data for downstream action consumption
+
 ### gleam-publish
 
 Publish Gleam packages to [Hex.pm](https://hex.pm/) in dependency order. Designed for monorepos with multiple Gleam packages — publishes each package sequentially and gracefully skips versions that are already on Hex.

@@ -1,0 +1,136 @@
+name: 'Read Gleam Workspace'
+description: 'Parse workspace.toml and output structured package metadata for other actions'
+
+inputs:
+  working-directory:
+    description: 'Repository root directory'
+    required: false
+    default: '.'
+  workspace-file:
+    description: 'Path to workspace config file (relative to working-directory)'
+    required: false
+    default: 'workspace.toml'
+
+outputs:
+  packages:
+    description: 'Space-separated package paths in declared order (for gleam-publish)'
+    value: ${{ steps.parse.outputs.packages }}
+  projects:
+    description: 'Comma-separated package names (for changie-release, auto-tag)'
+    value: ${{ steps.parse.outputs.projects }}
+  version-files:
+    description: 'Newline-separated name:path/gleam.toml:version entries (for changie-release)'
+    value: ${{ steps.parse.outputs.version-files }}
+  packages-json:
+    description: 'JSON array of {name, path, version} objects'
+    value: ${{ steps.parse.outputs.packages-json }}
+  cache-hash-globs:
+    description: 'Comma-separated gleam.toml and manifest.toml paths for cache hashFiles()'
+    value: ${{ steps.parse.outputs.cache-hash-globs }}
+
+runs:
+  using: composite
+  steps:
+    - name: Parse workspace
+      id: parse
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        WORKSPACE_FILE: ${{ inputs.workspace-file }}
+      run: |
+        if [ ! -f "$WORKSPACE_FILE" ]; then
+          echo "::error::Workspace file not found: $WORKSPACE_FILE"
+          exit 1
+        fi
+
+        python3 << 'PARSE_WORKSPACE_EOF'
+        import tomllib, glob, os, json, re
+
+        workspace_file = os.environ["WORKSPACE_FILE"]
+        with open(workspace_file, "rb") as f:
+            config = tomllib.load(f)
+
+        ws = config.get("workspace", {})
+        members = ws.get("members", [])
+        excludes = ws.get("exclude", [])
+
+        # Expand members: literal paths kept in order, globs expanded + sorted
+        expanded = []
+        for pattern in members:
+            if any(c in pattern for c in ("*", "?", "[" )):
+                matched = sorted(glob.glob(pattern))
+                for m in matched:
+                    if os.path.isdir(m) and os.path.isfile(os.path.join(m, "gleam.toml")):
+                        expanded.append(m)
+            else:
+                if os.path.isdir(pattern) and os.path.isfile(os.path.join(pattern, "gleam.toml")):
+                    expanded.append(pattern)
+                elif pattern == "." and os.path.isfile("gleam.toml"):
+                    expanded.append(".")
+                else:
+                    print(f"::warning::Member '{pattern}' has no gleam.toml, skipping")
+
+        # Apply excludes
+        for exc in excludes:
+            if any(c in exc for c in ("*", "?", "[")):
+                exc_matches = set(glob.glob(exc))
+                expanded = [p for p in expanded if p not in exc_matches]
+            else:
+                expanded = [p for p in expanded if p != exc]
+
+        if not expanded:
+            print("::error::No packages found after expanding workspace members")
+            raise SystemExit(1)
+
+        # Read name and version from each gleam.toml
+        packages = []
+        for pkg_path in expanded:
+            toml_path = os.path.join(pkg_path, "gleam.toml") if pkg_path != "." else "gleam.toml"
+            with open(toml_path, "rb") as f:
+                pkg_config = tomllib.load(f)
+            name = pkg_config.get("name", "")
+            version = pkg_config.get("version", "")
+            if not name:
+                print(f"::warning::No 'name' in {toml_path}, skipping")
+                continue
+            packages.append({"name": name, "path": pkg_path, "version": version})
+
+        # Build outputs
+        packages_str = " ".join(p["path"] for p in packages)
+        projects_str = ",".join(p["name"] for p in packages)
+
+        version_files_lines = []
+        for p in packages:
+            toml_rel = os.path.join(p["path"], "gleam.toml") if p["path"] != "." else "gleam.toml"
+            version_files_lines.append(f"{p['name']}:{toml_rel}:version")
+        version_files_str = "\n".join(version_files_lines)
+
+        # Cache hash globs: collect all gleam.toml and manifest.toml paths
+        cache_globs = []
+        for p in packages:
+            prefix = p["path"]
+            if prefix == ".":
+                cache_globs.extend(["gleam.toml", "manifest.toml"])
+            else:
+                cache_globs.extend([f"{prefix}/gleam.toml", f"{prefix}/manifest.toml"])
+        cache_hash_str = ", ".join(f"'{g}'" for g in cache_globs)
+
+        packages_json = json.dumps(packages)
+
+        # Write to GITHUB_OUTPUT
+        output_file = os.environ["GITHUB_OUTPUT"]
+        with open(output_file, "a") as out:
+            out.write(f"packages={packages_str}\n")
+            out.write(f"projects={projects_str}\n")
+            # Multiline output for version-files
+            out.write(f"version-files<<EOF_VERSION_FILES\n")
+            out.write(f"{version_files_str}\n")
+            out.write(f"EOF_VERSION_FILES\n")
+            out.write(f"packages-json={packages_json}\n")
+            out.write(f"cache-hash-globs={cache_hash_str}\n")
+
+        # Summary
+        print(f"Found {len(packages)} package(s):")
+        for p in packages:
+            print(f"  {p['name']}@{p['version']} ({p['path']})")
+        PARSE_WORKSPACE_EOF
