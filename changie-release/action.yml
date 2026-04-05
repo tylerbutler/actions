@@ -78,6 +78,15 @@ inputs:
         Only projects that were actually batched will have their version files updated.
     required: false
     default: ''
+  post-batch-command:
+    description: |
+      Shell command to run after version files are bumped but before the release PR
+      is created. Runs in working-directory. Use this to refresh lockfiles or run
+      other commands whose output should be included in the release PR commit.
+
+      Example: `gleam deps download && for d in packages/*/; do (cd "$d" && gleam deps download); done`
+    required: false
+    default: ''
 
 outputs:
   version:
@@ -288,6 +297,16 @@ runs:
             echo "Updated ${file}: ${key} = \"${SEMVER}\""
           done <<< "$VERSION_FILES"
         fi
+
+    - name: Run post-batch command
+      if: steps.check-changes.outputs.skipped != 'true' && steps.verify.outputs.proceed == 'true' && inputs.post-batch-command != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        POST_BATCH_COMMAND: ${{ inputs.post-batch-command }}
+      run: |
+        echo "Running post-batch command..."
+        eval "$POST_BATCH_COMMAND"
 
     - name: Read changelog
       if: steps.check-changes.outputs.skipped != 'true' && steps.verify.outputs.proceed == 'true'

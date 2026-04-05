@@ -16,7 +16,7 @@ Reusable composite actions for CI/CD workflows. Used across multiple repositorie
 | `changie-release` | Batch changie entries and create release PR (single or multi-project) |
 | `changie-auto-tag` | Create version tag(s) from latest changie release (single or multi-project) |
 | `changie-check` | Detect PR-added changie fragments and render preview |
-| `gleam-publish` | Publish Gleam packages to Hex.pm in dependency order |
+| `gleam-publish` | Publish Gleam packages to Hex.pm in dependency order, with optional path dep rewriting |
 | `binary-size` | Measure binary file sizes and report deltas vs baseline |
 | `download-ccl-tests` | Download CCL test data from CatConfLang/ccl-test-data releases |
 
@@ -170,9 +170,12 @@ Both actions are fully backward compatible:
 - `changie-release` reads `.changie.yaml` to find the unreleased directory path (`changesDir`/`unreleasedDir`)
 - PR body template supports `{version}` and `{changelog}` variables resolved via bash substitution
 - `changie-release` supports `version-files` input for bumping version in TOML files (only TOML is supported). Single-project format: `path:key` per line. Multi-project format: `project:path:key` per line. Only top-level keys are supported. Changes are included in the same commit as the changelog update via `peter-evans/create-pull-request`
+- `changie-release` supports `post-batch-command` input to run a shell command after version bumps but before the PR commit. Useful for refreshing lockfiles (e.g., `gleam deps download`) so the release PR includes up-to-date manifests
 - `changie-auto-tag` supports optional `create-release` input to create a GitHub Release with changie version notes. Uses `.changes/{version}.md` (or `.changes/{project}/{version}.md` for multi-project) as release notes if available, falls back to `--generate-notes`
 - In multi-project mode, `changie-release` reads `projectsVersionSeparator` from `.changie.yaml` (defaults to `-`) to correctly parse version strings like `my-package-v1.0.0`
 - In multi-project mode, the branch name template replaces `{version}` with `next` instead of the version string, since comma-separated versions aren't valid branch names
+
+- `gleam-publish` supports `replace-path-deps` input to rewrite path dependencies to Hex version ranges before publishing. Format: `dep-name:version-toml-path` per line. Reads version from the specified TOML file and generates a `">= X.Y.Z and < (X+1).0.0"` range. Essential for monorepos where sub-packages use `{ path = "..." }` deps during development
 
 ## Adding New Actions
 
