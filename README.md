@@ -571,7 +571,7 @@ This reads `my_lib`'s version from the root `gleam.toml`, then rewrites any `my_
 | `published` | Space-separated list of packages that were successfully published |
 | `skipped` | Space-separated list of packages skipped (already published) |
 
-**Example (monorepo with root package and path dep rewriting):**
+**Example (monorepo with root package and path dep rewriting using workspace):**
 
 ```yaml
 jobs:
@@ -579,14 +579,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: tylerbutler/actions/read-gleam-workspace@v1
+        id: ws
       - uses: tylerbutler/actions/setup-gleam@v1
       - uses: tylerbutler/actions/gleam-publish@v1
         with:
-          packages: >-
-            .
-            packages/my_lib_apple
-            packages/my_lib_google
-            packages/my_lib_wisp
+          packages: ${{ steps.ws.outputs.packages }}
           replace-path-deps: |
             my_lib:gleam.toml
           hex-api-key: ${{ secrets.HEXPM_API_KEY }}
