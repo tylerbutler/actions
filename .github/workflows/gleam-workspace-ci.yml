@@ -64,12 +64,12 @@ on:
         type: boolean
         default: true
       run-deps:
-        description: 'Whether setup-gleam should run dependency installation per package'
+        description: 'Whether to install dependencies in each package before running checks'
         required: false
         type: boolean
         default: true
       cache:
-        description: 'Whether setup-gleam should enable package-local caching'
+        description: 'Whether to enable workspace-aware dependency caching'
         required: false
         type: boolean
         default: false
@@ -109,7 +109,6 @@ jobs:
     runs-on: ${{ inputs.runs-on }}
     outputs:
       packages-json: ${{ steps.workspace.outputs.packages-json }}
-      cache-hash-globs: ${{ steps.workspace.outputs.cache-hash-globs }}
     steps:
       - uses: actions/checkout@v4
 
@@ -138,9 +137,20 @@ jobs:
           path: |
             ${{ inputs.working-directory }}/${{ matrix.package.path }}/build/packages
             ~/.cache/gleam
-          key: gleam-${{ runner.os }}-${{ matrix.package.name }}-${{ hashFiles(needs.discover.outputs.cache-hash-globs) }}
+          key: gleam-${{ runner.os }}-${{ matrix.package.name }}-${{ hashFiles(format('{0}/**/gleam.toml', inputs.working-directory), format('{0}/**/manifest.toml', inputs.working-directory)) }}
           restore-keys: |
             gleam-${{ runner.os }}-${{ matrix.package.name }}-
+
+      - name: Cache Mix dependencies
+        if: inputs.cache && inputs.elixir-version != ''
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ inputs.working-directory }}/${{ matrix.package.path }}/deps
+            ${{ inputs.working-directory }}/${{ matrix.package.path }}/_build
+          key: mix-${{ runner.os }}-${{ matrix.package.name }}-${{ inputs.elixir-version }}-${{ hashFiles(format('{0}/**/mix.lock', inputs.working-directory)) }}
+          restore-keys: |
+            mix-${{ runner.os }}-${{ matrix.package.name }}-${{ inputs.elixir-version }}-
 
       - name: Setup environment
         uses: tylerbutler/actions/setup-gleam@main
@@ -154,36 +164,61 @@ jobs:
           node: ${{ inputs.node }}
           node-version: ${{ inputs.node-version }}
           cache: false
-          working-directory: ${{ inputs.working-directory }}/${{ matrix.package.path }}
+          working-directory: ${{ inputs.working-directory }}
           install-just: ${{ inputs.install-just }}
-          run-deps: ${{ inputs.run-deps }}
+          run-deps: false
+
+      - name: Download dependencies
+        if: inputs.run-deps
+        uses: tylerbutler/actions/run-gleam-workspace@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          packages: ${{ matrix.package.path }}
+          command: |
+            if [ -f justfile ]; then
+              just deps
+            elif [ -f mix.exs ]; then
+              mix deps.get
+            else
+              gleam deps download
+            fi
 
       - name: Format check
         if: inputs.format-check
-        shell: bash
-        working-directory: ${{ inputs.working-directory }}/${{ matrix.package.path }}
-        run: gleam format --check src test
+        uses: tylerbutler/actions/run-gleam-workspace@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          packages: ${{ matrix.package.path }}
+          command: gleam format --check src test
 
       - name: Type check
         if: inputs.check
-        shell: bash
-        working-directory: ${{ inputs.working-directory }}/${{ matrix.package.path }}
-        run: gleam check
+        uses: tylerbutler/actions/run-gleam-workspace@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          packages: ${{ matrix.package.path }}
+          command: gleam check
 
       - name: Build (warnings as errors)
         if: inputs.build-strict
-        shell: bash
-        working-directory: ${{ inputs.working-directory }}/${{ matrix.package.path }}
-        run: gleam build --warnings-as-errors
+        uses: tylerbutler/actions/run-gleam-workspace@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          packages: ${{ matrix.package.path }}
+          command: gleam build --warnings-as-errors
 
       - name: Test
         if: inputs.test
-        shell: bash
-        working-directory: ${{ inputs.working-directory }}/${{ matrix.package.path }}
-        run: gleam test
+        uses: tylerbutler/actions/run-gleam-workspace@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          packages: ${{ matrix.package.path }}
+          command: gleam test
 
       - name: Docs
         if: inputs.docs
-        shell: bash
-        working-directory: ${{ inputs.working-directory }}/${{ matrix.package.path }}
-        run: gleam docs build
+        uses: tylerbutler/actions/run-gleam-workspace@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          packages: ${{ matrix.package.path }}
+          command: gleam docs build

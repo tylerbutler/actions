@@ -534,7 +534,7 @@ This is intended as an **escape hatch** for workspace-wide tasks that do not jus
 
 - uses: tylerbutler/actions/run-gleam-workspace@v1
   with:
-    packages-json: ${{ steps.ws.outputs.packages-json }}
+    packages: ${{ steps.ws.outputs.packages }}
     command: gleam deps download
 ```
 
@@ -542,18 +542,9 @@ This is intended as an **escape hatch** for workspace-wide tasks that do not jus
 
 | Input | Default | Description |
 |-------|---------|-------------|
-| `packages-json` | *(required)* | JSON array from `read-gleam-workspace` |
+| `packages` | *(required)* | Space-separated package paths from `read-gleam-workspace` |
 | `command` | *(required)* | Shell command to run in each package directory |
 | `working-directory` | `.` | Repository root directory |
-| `allow-empty` | `false` | Succeed when `packages-json` is empty |
-
-**Outputs:**
-
-| Output | Description |
-|--------|-------------|
-| `package-count` | Number of packages the command ran in |
-| `package-names` | Space-separated package names |
-| `package-paths` | Space-separated package paths |
 
 **Example (refresh lockfiles in every package):**
 
@@ -563,7 +554,7 @@ This is intended as an **escape hatch** for workspace-wide tasks that do not jus
 
 - uses: tylerbutler/actions/run-gleam-workspace@v1
   with:
-    packages-json: ${{ steps.ws.outputs.packages-json }}
+    packages: ${{ steps.ws.outputs.packages }}
     command: gleam deps download
 ```
 
@@ -720,7 +711,7 @@ jobs:
 | `test` | `true` | Run `gleam test` |
 | `docs` | `false` | Run `gleam docs build` |
 
-When `cache` is enabled, the workflow uses an explicit workspace-aware `actions/cache` step keyed by `read-gleam-workspace`'s `cache-hash-globs` output, plus the package name. `setup-gleam`'s built-in cache is disabled here so the reusable workflow controls monorepo invalidation behavior directly.
+When `cache` is enabled, each matrix job uses an explicit workspace-aware `actions/cache` step for that package's `build/packages` directory plus `~/.cache/gleam`. The cache key includes the package name and hashes all workspace `gleam.toml` and `manifest.toml` files. `setup-gleam`'s built-in cache is disabled here so the reusable workflow controls monorepo invalidation behavior directly.
 
 **Example (full Gleam workspace CI):**
 
