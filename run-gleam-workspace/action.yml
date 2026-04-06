@@ -1,0 +1,111 @@
+name: 'Run Gleam Workspace Command'
+description: 'Escape hatch: run a shell command sequentially in each package from read-gleam-workspace'
+
+inputs:
+  packages-json:
+    description: 'JSON array of package objects from read-gleam-workspace packages-json output'
+    required: true
+  command:
+    description: 'Shell command to run in each package directory'
+    required: true
+  working-directory:
+    description: 'Repository root directory'
+    required: false
+    default: '.'
+  allow-empty:
+    description: 'Whether to succeed when packages-json is empty'
+    required: false
+    default: 'false'
+
+outputs:
+  package-count:
+    description: 'Number of packages the command ran in'
+    value: ${{ steps.run.outputs.package-count }}
+  package-names:
+    description: 'Space-separated package names the command ran in'
+    value: ${{ steps.run.outputs.package-names }}
+  package-paths:
+    description: 'Space-separated package paths the command ran in'
+    value: ${{ steps.run.outputs.package-paths }}
+
+runs:
+  using: composite
+  steps:
+    - name: Run command in workspace packages
+      id: run
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        PACKAGES_JSON: ${{ inputs.packages-json }}
+        COMMAND: ${{ inputs.command }}
+        ALLOW_EMPTY: ${{ inputs.allow-empty }}
+      run: |
+        set -euo pipefail
+
+        if ! command -v jq >/dev/null 2>&1; then
+          echo "::error::jq is required but was not found on PATH"
+          exit 1
+        fi
+
+        if [ -z "${COMMAND}" ]; then
+          echo "::error::command input must not be empty"
+          exit 1
+        fi
+
+        if ! echo "${PACKAGES_JSON}" | jq -e 'type == "array"' >/dev/null; then
+          echo "::error::packages-json input must be a JSON array"
+          exit 1
+        fi
+
+        count="$(echo "${PACKAGES_JSON}" | jq 'length')"
+        if [ "${count}" = "0" ]; then
+          if [ "${ALLOW_EMPTY}" = "true" ]; then
+            {
+              echo "package-count=0"
+              echo "package-names="
+              echo "package-paths="
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "::error::No workspace packages found"
+          exit 1
+        fi
+
+        package_names=()
+        package_paths=()
+
+        while IFS= read -r item; do
+          decoded="$(printf '%s' "${item}" | base64 -d)"
+          name="$(printf '%s' "${decoded}" | jq -r '.name')"
+          path="$(printf '%s' "${decoded}" | jq -r '.path')"
+
+          if [ -z "${name}" ] || [ "${name}" = "null" ]; then
+            echo "::error::Package entry missing name"
+            exit 1
+          fi
+          if [ -z "${path}" ] || [ "${path}" = "null" ]; then
+            echo "::error::Package entry missing path"
+            exit 1
+          fi
+          if [ ! -d "${path}" ]; then
+            echo "::error::Package directory not found: ${path}"
+            exit 1
+          fi
+
+          echo "::group::${name} (${path})"
+          (
+            cd "${path}"
+            bash -c "${COMMAND}"
+          )
+          echo "::endgroup::"
+
+          package_names+=("${name}")
+          package_paths+=("${path}")
+        done < <(echo "${PACKAGES_JSON}" | jq -r '.[] | @base64')
+
+        {
+          echo "package-count=${#package_names[@]}"
+          echo "package-names=${package_names[*]}"
+          echo "package-paths=${package_paths[*]}"
+        } >> "$GITHUB_OUTPUT"

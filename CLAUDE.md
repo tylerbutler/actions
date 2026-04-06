@@ -18,6 +18,7 @@ Reusable composite actions for CI/CD workflows. Used across multiple repositorie
 | `changie-check` | Detect PR-added changie fragments and render preview |
 | `gleam-publish` | Publish Gleam packages to Hex.pm in dependency order, with optional path dep rewriting |
 | `read-gleam-workspace` | Parse workspace.toml with glob support, output structured package metadata for other actions |
+| `run-gleam-workspace` | Escape hatch: run a shell command in each package from `packages-json` |
 | `binary-size` | Measure binary file sizes and report deltas vs baseline |
 | `download-ccl-tests` | Download CCL test data from CatConfLang/ccl-test-data releases |
 
@@ -76,6 +77,7 @@ Reusable workflows live in `.github/workflows/` and are called with `uses:` from
 | Workflow | Purpose |
 |----------|---------|
 | `auto-tag.yml` | Tags releases when release PRs merge (wraps `changie-auto-tag` action) |
+| `gleam-workspace-ci.yml` | Matrix CI for Gleam monorepos using `read-gleam-workspace` |
 
 ## Multi-Project Support
 
@@ -180,6 +182,8 @@ Both actions are fully backward compatible:
 
 - `gleam-publish` supports `replace-path-deps` input to rewrite path dependencies to Hex version ranges before publishing. Format: `dep-name:version-toml-path` per line. Reads version from the specified TOML file and generates a `">= X.Y.Z and < (X+1).0.0"` range (or `< 0.(Y+1).0` for pre-1.0). Essential for monorepos where sub-packages use `{ path = "..." }` deps during development
 - `read-gleam-workspace` parses `workspace.toml` with `[workspace]` section containing `members` (glob-enabled) and `exclude` arrays. Uses Python `tomllib` (stdlib). Topologically sorts packages by intra-workspace dependencies so output order is safe for publishing. Outputs: `packages` (space-separated paths), `projects` (comma-separated names), `version-files` (changie format), `packages-json` (JSON), `cache-hash-globs` (for hashFiles)
+- `run-gleam-workspace` is a bash + jq escape hatch for sequential workspace-wide tasks. It consumes `read-gleam-workspace`'s `packages-json` output and runs a caller-provided shell command in each package directory. Prefer dedicated actions/reusable workflows for common cases; use this when the repo needs one-off workspace iteration.
+- `gleam-workspace-ci.yml` is a reusable workflow for Gleam monorepos. It discovers packages from `workspace.toml`, then runs the standard Gleam CI steps (`format --check`, `check`, `build --warnings-as-errors`, `test`, optional docs) in a per-package matrix after calling `setup-gleam`.
 
 ## Workspace File Format
 

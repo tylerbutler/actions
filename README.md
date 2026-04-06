@@ -522,6 +522,51 @@ jobs:
 5. Topologically sorts packages by intra-workspace dependencies (dependencies come before dependents), so `packages` output is always in safe publish order
 6. Outputs structured data for downstream action consumption
 
+### run-gleam-workspace
+
+Run a shell command sequentially in each package returned by `read-gleam-workspace`.
+
+This is intended as an **escape hatch** for workspace-wide tasks that do not justify a dedicated action or reusable workflow. For standard Gleam CI, prefer `gleam-workspace-ci.yml`.
+
+```yaml
+- uses: tylerbutler/actions/read-gleam-workspace@v1
+  id: ws
+
+- uses: tylerbutler/actions/run-gleam-workspace@v1
+  with:
+    packages-json: ${{ steps.ws.outputs.packages-json }}
+    command: gleam deps download
+```
+
+**Inputs:**
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `packages-json` | *(required)* | JSON array from `read-gleam-workspace` |
+| `command` | *(required)* | Shell command to run in each package directory |
+| `working-directory` | `.` | Repository root directory |
+| `allow-empty` | `false` | Succeed when `packages-json` is empty |
+
+**Outputs:**
+
+| Output | Description |
+|--------|-------------|
+| `package-count` | Number of packages the command ran in |
+| `package-names` | Space-separated package names |
+| `package-paths` | Space-separated package paths |
+
+**Example (refresh lockfiles in every package):**
+
+```yaml
+- uses: tylerbutler/actions/read-gleam-workspace@v1
+  id: ws
+
+- uses: tylerbutler/actions/run-gleam-workspace@v1
+  with:
+    packages-json: ${{ steps.ws.outputs.packages-json }}
+    command: gleam deps download
+```
+
 ### gleam-publish
 
 Publish Gleam packages to [Hex.pm](https://hex.pm/) in dependency order. Designed for monorepos with multiple Gleam packages — publishes each package sequentially and gracefully skips versions that are already on Hex.
@@ -631,6 +676,74 @@ jobs:
 6. Writes a summary of published/skipped/failed packages to the GitHub Step Summary
 
 ## Reusable Workflows
+
+### gleam-workspace-ci
+
+Reusable workflow for Gleam monorepos. It discovers packages from `workspace.toml`, then runs the standard Gleam CI commands in a per-package matrix:
+
+- `gleam format --check src test`
+- `gleam check`
+- `gleam build --warnings-as-errors`
+- `gleam test`
+- `gleam docs build` (optional)
+
+```yaml
+jobs:
+  ci:
+    uses: tylerbutler/actions/.github/workflows/gleam-workspace-ci.yml@v1
+    with:
+      docs: true
+```
+
+**Inputs:**
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `runs-on` | `ubuntu-latest` | Runner label for all jobs |
+| `working-directory` | `.` | Repository root directory |
+| `workspace-file` | `workspace.toml` | Path to workspace config |
+| `version-file` | `.tool-versions` | Path to version file relative to repo root |
+| `version-type` | `strict` | Version matching mode for `setup-gleam` |
+| `erlang-version` | `''` | Explicit Erlang version override |
+| `gleam-version` | `''` | Explicit Gleam version override |
+| `elixir-version` | `''` | Optional Elixir version |
+| `rebar-version` | `''` | Optional Rebar3 version |
+| `node` | `false` | Setup Node.js for JavaScript target |
+| `node-version` | `22` | Node.js version |
+| `install-just` | `true` | Install `just` via `setup-gleam` |
+| `run-deps` | `true` | Run dependency installation in each package |
+| `cache` | `false` | Enable workspace-aware dependency caching for each package job |
+| `fail-fast` | `false` | Stop the package matrix on first failure |
+| `format-check` | `true` | Run `gleam format --check src test` |
+| `check` | `true` | Run `gleam check` |
+| `build-strict` | `true` | Run `gleam build --warnings-as-errors` |
+| `test` | `true` | Run `gleam test` |
+| `docs` | `false` | Run `gleam docs build` |
+
+When `cache` is enabled, the workflow uses an explicit workspace-aware `actions/cache` step keyed by `read-gleam-workspace`'s `cache-hash-globs` output, plus the package name. `setup-gleam`'s built-in cache is disabled here so the reusable workflow controls monorepo invalidation behavior directly.
+
+**Example (full Gleam workspace CI):**
+
+```yaml
+jobs:
+  ci:
+    uses: tylerbutler/actions/.github/workflows/gleam-workspace-ci.yml@v1
+    with:
+      docs: true
+```
+
+**Example (tests only):**
+
+```yaml
+jobs:
+  ci:
+    uses: tylerbutler/actions/.github/workflows/gleam-workspace-ci.yml@v1
+    with:
+      format-check: false
+      check: false
+      build-strict: false
+      docs: false
+```
 
 ### auto-tag
 

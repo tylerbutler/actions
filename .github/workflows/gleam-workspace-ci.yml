@@ -1,0 +1,189 @@
+name: Gleam Workspace CI
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: 'Runner label for all jobs'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+      working-directory:
+        description: 'Repository root directory'
+        required: false
+        type: string
+        default: '.'
+      workspace-file:
+        description: 'Path to workspace.toml relative to working-directory'
+        required: false
+        type: string
+        default: 'workspace.toml'
+      version-file:
+        description: 'Path to .tool-versions relative to working-directory'
+        required: false
+        type: string
+        default: '.tool-versions'
+      version-type:
+        description: 'Version matching mode for setup-gleam'
+        required: false
+        type: string
+        default: 'strict'
+      erlang-version:
+        description: 'Explicit Erlang/OTP version override'
+        required: false
+        type: string
+        default: ''
+      gleam-version:
+        description: 'Explicit Gleam version override'
+        required: false
+        type: string
+        default: ''
+      elixir-version:
+        description: 'Optional Elixir version for Mix-enabled projects'
+        required: false
+        type: string
+        default: ''
+      rebar-version:
+        description: 'Optional Rebar3 version (used with Elixir)'
+        required: false
+        type: string
+        default: ''
+      node:
+        description: 'Whether to setup Node.js for JavaScript target'
+        required: false
+        type: boolean
+        default: false
+      node-version:
+        description: 'Node.js version to install when node=true'
+        required: false
+        type: string
+        default: '22'
+      install-just:
+        description: 'Whether setup-gleam should install just'
+        required: false
+        type: boolean
+        default: true
+      run-deps:
+        description: 'Whether setup-gleam should run dependency installation per package'
+        required: false
+        type: boolean
+        default: true
+      cache:
+        description: 'Whether setup-gleam should enable package-local caching'
+        required: false
+        type: boolean
+        default: false
+      fail-fast:
+        description: 'Whether the package matrix should stop on first failure'
+        required: false
+        type: boolean
+        default: false
+      format-check:
+        description: 'Whether to run gleam format --check src test in each package'
+        required: false
+        type: boolean
+        default: true
+      check:
+        description: 'Whether to run gleam check in each package'
+        required: false
+        type: boolean
+        default: true
+      build-strict:
+        description: 'Whether to run gleam build --warnings-as-errors in each package'
+        required: false
+        type: boolean
+        default: true
+      test:
+        description: 'Whether to run gleam test in each package'
+        required: false
+        type: boolean
+        default: true
+      docs:
+        description: 'Whether to run gleam docs build in each package'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  discover:
+    runs-on: ${{ inputs.runs-on }}
+    outputs:
+      packages-json: ${{ steps.workspace.outputs.packages-json }}
+      cache-hash-globs: ${{ steps.workspace.outputs.cache-hash-globs }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read workspace
+        id: workspace
+        uses: tylerbutler/actions/read-gleam-workspace@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          workspace-file: ${{ inputs.workspace-file }}
+
+  ci:
+    needs: discover
+    runs-on: ${{ inputs.runs-on }}
+    strategy:
+      fail-fast: ${{ inputs.fail-fast }}
+      matrix:
+        package: ${{ fromJson(needs.discover.outputs.packages-json) }}
+    name: ${{ matrix.package.name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Gleam dependencies
+        if: inputs.cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ inputs.working-directory }}/${{ matrix.package.path }}/build/packages
+            ~/.cache/gleam
+          key: gleam-${{ runner.os }}-${{ matrix.package.name }}-${{ hashFiles(needs.discover.outputs.cache-hash-globs) }}
+          restore-keys: |
+            gleam-${{ runner.os }}-${{ matrix.package.name }}-
+
+      - name: Setup environment
+        uses: tylerbutler/actions/setup-gleam@main
+        with:
+          erlang-version: ${{ inputs.erlang-version }}
+          gleam-version: ${{ inputs.gleam-version }}
+          elixir-version: ${{ inputs.elixir-version }}
+          rebar-version: ${{ inputs.rebar-version }}
+          version-file: ${{ github.workspace }}/${{ inputs.working-directory }}/${{ inputs.version-file }}
+          version-type: ${{ inputs.version-type }}
+          node: ${{ inputs.node }}
+          node-version: ${{ inputs.node-version }}
+          cache: false
+          working-directory: ${{ inputs.working-directory }}/${{ matrix.package.path }}
+          install-just: ${{ inputs.install-just }}
+          run-deps: ${{ inputs.run-deps }}
+
+      - name: Format check
+        if: inputs.format-check
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}/${{ matrix.package.path }}
+        run: gleam format --check src test
+
+      - name: Type check
+        if: inputs.check
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}/${{ matrix.package.path }}
+        run: gleam check
+
+      - name: Build (warnings as errors)
+        if: inputs.build-strict
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}/${{ matrix.package.path }}
+        run: gleam build --warnings-as-errors
+
+      - name: Test
+        if: inputs.test
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}/${{ matrix.package.path }}
+        run: gleam test
+
+      - name: Docs
+        if: inputs.docs
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}/${{ matrix.package.path }}
+        run: gleam docs build
