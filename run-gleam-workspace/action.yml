@@ -1,0 +1,50 @@
+name: 'Run Gleam Workspace Command'
+description: 'Escape hatch: run a shell command sequentially in each package from read-gleam-workspace'
+
+inputs:
+  packages:
+    description: 'Space-separated package paths from read-gleam-workspace packages output'
+    required: true
+  command:
+    description: 'Shell command to run in each package directory'
+    required: true
+  working-directory:
+    description: 'Repository root directory'
+    required: false
+    default: '.'
+
+runs:
+  using: composite
+  steps:
+    - name: Run command in workspace packages
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        PACKAGES: ${{ inputs.packages }}
+        COMMAND: ${{ inputs.command }}
+      run: |
+        set -euo pipefail
+
+        if [ -z "${PACKAGES}" ]; then
+          echo "::error::packages input must not be empty"
+          exit 1
+        fi
+
+        if [ -z "${COMMAND}" ]; then
+          echo "::error::command input must not be empty"
+          exit 1
+        fi
+
+        for path in ${PACKAGES}; do
+          if [ ! -d "${path}" ]; then
+            echo "::error::Package directory not found: ${path}"
+            exit 1
+          fi
+
+          echo "::group::${path}"
+          (
+            cd "${path}"
+            bash -c "${COMMAND}"
+          )
+          echo "::endgroup::"
+        done
