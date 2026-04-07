@@ -103,6 +103,11 @@ on:
         required: false
         type: boolean
         default: false
+      custom-command:
+        description: 'Arbitrary shell command to run in each package directory'
+        required: false
+        type: string
+        default: ''
 
 jobs:
   discover:
@@ -222,3 +227,11 @@ jobs:
           working-directory: ${{ inputs.working-directory }}
           packages: ${{ matrix.package.path }}
           command: gleam docs build
+
+      - name: Custom command
+        if: inputs.custom-command != ''
+        uses: tylerbutler/actions/run-gleam-workspace@0706a6188c9a264fa0df9fb08754728bf6d8eff6 # ratchet:tylerbutler/actions/run-gleam-workspace@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          packages: ${{ matrix.package.path }}
+          command: ${{ inputs.custom-command }}
