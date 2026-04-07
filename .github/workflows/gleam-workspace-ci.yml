@@ -62,12 +62,12 @@ on:
         description: 'Whether setup-gleam should install just'
         required: false
         type: boolean
-        default: true
+        default: false
       run-deps:
         description: 'Whether to install dependencies in each package before running checks'
         required: false
         type: boolean
-        default: true
+        default: false
       cache:
         description: 'Whether to enable workspace-aware dependency caching'
         required: false
@@ -82,12 +82,12 @@ on:
         description: 'Whether to run gleam format --check src test in each package'
         required: false
         type: boolean
-        default: true
+        default: false
       check:
         description: 'Whether to run gleam check in each package'
         required: false
         type: boolean
-        default: true
+        default: false
       build-strict:
         description: 'Whether to run gleam build --warnings-as-errors in each package'
         required: false
@@ -97,7 +97,12 @@ on:
         description: 'Whether to run gleam test in each package'
         required: false
         type: boolean
-        default: true
+        default: false
+      test-js:
+        description: 'Whether to run gleam test --target javascript in each package (implies node=true)'
+        required: false
+        type: boolean
+        default: false
       docs:
         description: 'Whether to run gleam docs build in each package'
         required: false
@@ -166,7 +171,7 @@ jobs:
           rebar-version: ${{ inputs.rebar-version }}
           version-file: ${{ github.workspace }}/${{ inputs.working-directory }}/${{ inputs.version-file }}
           version-type: ${{ inputs.version-type }}
-          node: ${{ inputs.node }}
+          node: ${{ inputs.node || inputs.test-js }}
           node-version: ${{ inputs.node-version }}
           cache: false
           working-directory: ${{ inputs.working-directory }}
@@ -219,6 +224,14 @@ jobs:
           working-directory: ${{ inputs.working-directory }}
           packages: ${{ matrix.package.path }}
           command: gleam test
+
+      - name: Test (JavaScript)
+        if: inputs.test-js
+        uses: tylerbutler/actions/run-gleam-workspace@0706a6188c9a264fa0df9fb08754728bf6d8eff6 # ratchet:tylerbutler/actions/run-gleam-workspace@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          packages: ${{ matrix.package.path }}
+          command: gleam test --target javascript
 
       - name: Docs
         if: inputs.docs
