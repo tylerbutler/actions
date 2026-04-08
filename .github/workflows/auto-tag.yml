@@ -70,7 +70,7 @@ jobs:
         with:
           token: ${{ steps.app-token.outputs.token || github.token }}
 
-      - uses: tylerbutler/actions/changie-auto-tag@07dae2969549e29a24a5fa49311795efff2ed66d # ratchet:tylerbutler/actions/changie-auto-tag@main
+      - uses: tylerbutler/actions/changie-auto-tag@434af6fb683e908d5a2fab1b53849c2d54a86566 # ratchet:tylerbutler/actions/changie-auto-tag@main
         id: auto-tag
         with:
           changie-version: ${{ inputs.changie-version }}
