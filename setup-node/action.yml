@@ -22,10 +22,10 @@ inputs:
     description: 'Working directory for dependency installation'
     required: false
     default: '.'
-  install-just:
-    description: 'Whether to install just task runner'
+  tools:
+    description: 'Tools to install via taiki-e/install-action (comma-separated, e.g., "just,cargo-bloat")'
     required: false
-    default: 'true'
+    default: 'just'
   run-install:
     description: 'Whether to run package install'
     required: false
@@ -34,11 +34,11 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Install just
-      if: inputs.install-just == 'true'
+    - name: Install tools
+      if: inputs.tools != ''
       uses: taiki-e/install-action@4573997e3b6c0fbc22f7acab193b00a8a3ca817d # ratchet:taiki-e/install-action@v2
       with:
-        tool: just
+        tool: ${{ inputs.tools }}
 
     - name: Setup pnpm
       if: inputs.package-manager == 'pnpm'
