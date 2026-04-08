@@ -23,6 +23,11 @@ on:
         required: false
         type: string
         default: ''
+      workspace-file:
+        description: 'Path to workspace.toml (relative to working-directory). When set, reads projects from the workspace file via read-gleam-workspace. Overrides the projects input.'
+        required: false
+        type: string
+        default: ''
       create-release:
         description: 'Create a GitHub Release from the tag with changie version notes'
         required: false
@@ -70,12 +75,20 @@ jobs:
         with:
           token: ${{ steps.app-token.outputs.token || github.token }}
 
+      - name: Read workspace
+        if: inputs.workspace-file != ''
+        id: workspace
+        uses: tylerbutler/actions/read-gleam-workspace@434af6fb683e908d5a2fab1b53849c2d54a86566 # ratchet:tylerbutler/actions/read-gleam-workspace@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          workspace-file: ${{ inputs.workspace-file }}
+
       - uses: tylerbutler/actions/changie-auto-tag@434af6fb683e908d5a2fab1b53849c2d54a86566 # ratchet:tylerbutler/actions/changie-auto-tag@main
         id: auto-tag
         with:
           changie-version: ${{ inputs.changie-version }}
           working-directory: ${{ inputs.working-directory }}
           tag-prefix: ${{ inputs.tag-prefix }}
-          projects: ${{ inputs.projects }}
+          projects: ${{ steps.workspace.outputs.projects || inputs.projects }}
           create-release: ${{ inputs.create-release }}
           token: ${{ steps.app-token.outputs.token || github.token }}
