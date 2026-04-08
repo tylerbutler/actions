@@ -58,11 +58,11 @@ on:
         required: false
         type: string
         default: '22'
-      install-just:
-        description: 'Whether setup-gleam should install just'
+      tools:
+        description: 'Tools to install via taiki-e/install-action (comma-separated)'
         required: false
-        type: boolean
-        default: false
+        type: string
+        default: ''
       run-deps:
         description: 'Whether to install dependencies in each package before running checks'
         required: false
@@ -175,7 +175,7 @@ jobs:
           node-version: ${{ inputs.node-version }}
           cache: false
           working-directory: ${{ inputs.working-directory }}
-          install-just: ${{ inputs.install-just }}
+          tools: ${{ inputs.tools }}
           run-deps: false
 
       - name: Download dependencies

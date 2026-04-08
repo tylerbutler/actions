@@ -28,7 +28,7 @@ Setup Gleam/BEAM environment with caching, optional Elixir, and optional JavaScr
 | `node-version` | `22` | Node.js version |
 | `cache` | `true` | Cache Gleam dependencies (and Mix deps when Elixir enabled) |
 | `working-directory` | `.` | Working directory |
-| `install-just` | `true` | Install just task runner |
+| `tools` | `just` | Tools to install via taiki-e/install-action (comma-separated) |
 | `run-deps` | `true` | Run dependency download |
 
 **Example (Gleam only):**
@@ -142,7 +142,7 @@ Setup Node.js with package manager (pnpm, npm, yarn, or bun) and caching.
 | `pnpm-version` | `latest` | pnpm version |
 | `cache` | `true` | Cache dependencies |
 | `working-directory` | `.` | Working directory |
-| `install-just` | `true` | Install just task runner |
+| `tools` | `just` | Tools to install via taiki-e/install-action (comma-separated) |
 | `run-install` | `true` | Run package install |
 
 **Example:**
@@ -175,7 +175,7 @@ Setup Go environment with caching and optional [mise](https://mise.jdx.dev/) too
 | `go-version-file` | `go.mod` | Path to go.mod or version file |
 | `cache` | `true` | Cache Go modules |
 | `working-directory` | `.` | Working directory |
-| `install-just` | `true` | Install just task runner |
+| `tools` | `just` | Tools to install via taiki-e/install-action (comma-separated) |
 | `install-mise` | `false` | Install mise and run mise install for project tools |
 | `run-deps` | `true` | Run go mod download |
 
@@ -701,7 +701,7 @@ jobs:
 | `rebar-version` | `''` | Optional Rebar3 version |
 | `node` | `false` | Setup Node.js for JavaScript target |
 | `node-version` | `22` | Node.js version |
-| `install-just` | `true` | Install `just` via `setup-gleam` |
+| `tools` | `''` | Tools to install via `setup-gleam` (comma-separated) |
 | `run-deps` | `true` | Run dependency installation in each package |
 | `cache` | `false` | Enable workspace-aware dependency caching for each package job |
 | `fail-fast` | `false` | Stop the package matrix on first failure |
