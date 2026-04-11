@@ -133,7 +133,7 @@ projects:
 - Creates a GitHub Release per new tag (when `create-release` is true)
 - Release notes sourced from `.changes/{project}/{version}.md`
 - `created-tags` output lists only the tags that were actually created
-- Tags are pushed in a single `git push` for atomicity
+- Tags are pushed individually to ensure each generates a GitHub push event (batch pushes of >3 tags do not trigger workflow events)
 
 ### auto-tag.yml reusable workflow with projects
 
