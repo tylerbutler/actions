@@ -21,6 +21,7 @@ Reusable composite actions for CI/CD workflows. Used across multiple repositorie
 | `run-gleam-workspace` | Escape hatch: run a shell command in each package from `packages` |
 | `binary-size` | Measure binary file sizes and report deltas vs baseline |
 | `download-ccl-tests` | Download CCL test data from CatConfLang/ccl-test-data releases |
+| `publish-homebrew-formula` | Custom dist `publish-jobs` action that commits the dist-generated .rb formula to a tap using a GitHub App token instead of a PAT |
 
 ## Usage Pattern
 
@@ -59,6 +60,8 @@ actions/
 │   └── action.yml      # Binary file size reporting
 ├── download-ccl-tests/
 │   └── action.yml      # CCL test data download
+├── publish-homebrew-formula/
+│   └── action.yml      # Commit dist .rb formula to a tap via GitHub App token
 ├── README.md           # User documentation
 └── LICENSE
 ```
@@ -184,6 +187,7 @@ Both actions are fully backward compatible:
 - `read-gleam-workspace` parses `workspace.toml` with `[workspace]` section containing `members` (glob-enabled) and `exclude` arrays. Uses Python `tomllib` (stdlib). Topologically sorts packages by intra-workspace dependencies so output order is safe for publishing. Outputs: `packages` (space-separated paths), `projects` (comma-separated names), `version-files` (changie format), `packages-json` (JSON), `cache-hash-globs` (for hashFiles)
 - `run-gleam-workspace` is a minimal bash escape hatch for sequential workspace-wide tasks. It consumes `read-gleam-workspace`'s `packages` output and runs a caller-provided shell command in each package directory. Prefer dedicated actions/reusable workflows for common cases; use this when the repo needs one-off workspace iteration.
 - `gleam-workspace-ci.yml` is a reusable workflow for Gleam monorepos. It discovers packages from `workspace.toml`, then runs the standard Gleam CI steps (`format --check`, `check`, `build --warnings-as-errors`, `test`, optional docs) in a per-package matrix after calling `setup-gleam`.
+- `publish-homebrew-formula` is a composite action used as a custom dist `publish-jobs` step. **Not invoked directly by dist** — dist requires custom publish jobs to be local reusable workflows (`./my-job.yml` in `.github/workflows/`), so the consumer repo defines a ~20-line shim reusable workflow that calls this action. Replaces dist's built-in homebrew publish to use a GitHub App installation token instead of `HOMEBREW_TAP_TOKEN` PAT. `installers = ["homebrew"]` still drives .rb generation; `publish-jobs = ["./publish-homebrew-tap"]` swaps only the publish step. The tap-repo input is split into owner/repo in a small bash step so `actions/create-github-app-token` can scope the token to just that repo. Why App token over PAT: tokens are 1-hour scoped installation tokens, not tied to a user, and do not need manual rotation.
 
 ## Workspace File Format
 
