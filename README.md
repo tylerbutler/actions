@@ -876,6 +876,59 @@ Download test data JSON files from [CatConfLang/ccl-test-data](https://github.co
     output-dir: tests/test_data
 ```
 
+### publish-homebrew-formula
+
+Commit a dist-generated Homebrew formula to a tap repo using a **GitHub App installation token** instead of a long-lived personal access token. Designed to be called from a thin reusable workflow registered as a [custom `publish-jobs` entry in `dist-workspace.toml`](https://github.com/axodotdev/cargo-dist/blob/main/book/src/ci/customizing.md#custom-jobs).
+
+```yaml
+# .github/workflows/publish-homebrew-tap.yml in the consuming repo
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+
+jobs:
+  publish-homebrew-formula:
+    runs-on: ubuntu-22.04
+    if: ${{ !fromJson(inputs.plan).announcement_is_prerelease || fromJson(inputs.plan).publish_prereleases }}
+    steps:
+      - uses: tylerbutler/actions/publish-homebrew-formula@v1
+        with:
+          app-id: ${{ secrets.HOMEBREW_TAP_APP_ID }}
+          private-key: ${{ secrets.HOMEBREW_TAP_APP_PRIVATE_KEY }}
+          tap-repo: tylerbutler/homebrew-tap
+          plan: ${{ inputs.plan }}
+```
+
+Then in `dist-workspace.toml`:
+
+```toml
+publish-jobs = ["./publish-homebrew-tap"]
+```
+
+**Inputs:**
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `app-id` | (required) | GitHub App ID; the app must be installed on the tap repo with `contents: write` |
+| `private-key` | (required) | GitHub App private key (PEM) |
+| `tap-repo` | (required) | Tap repo in `owner/repo` form (e.g. `tylerbutler/homebrew-tap`) |
+| `plan` | (required) | dist plan JSON (pass through from the calling reusable workflow) |
+| `artifact-pattern` | `artifacts-*` | Pattern for `actions/download-artifact` |
+| `commit-user` | `github-actions[bot]` | git `user.name` |
+| `commit-email` | `41898282+github-actions[bot]@users.noreply.github.com` | git `user.email` |
+| `install-linuxbrew` | `true` | Run `brew style --fix` on each formula before commit |
+
+**Prerequisites:**
+
+1. Create a GitHub App owned by the tap owner. Minimum permissions: `Contents: write`.
+2. Install the app on both the source repo (doing the release) and the tap repo.
+3. Store the app ID and a generated private key as repo secrets (`HOMEBREW_TAP_APP_ID`, `HOMEBREW_TAP_APP_PRIVATE_KEY`) in the source repo.
+
+The installation token is minted per-run and expires in one hour — no rotation needed.
+
 ## Versioning
 
 Use semantic versioning tags:
