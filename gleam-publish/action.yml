@@ -92,6 +92,8 @@ runs:
             if grep -q "${dep_name} = { path = " "$toml"; then
               sed -i "s|${dep_name} = { path = \"[^\"]*\" }|${dep_name} = \"${hex_range}\"|" "$toml"
               echo "  Rewrote $toml"
+              rm -f "$pkg_dir/manifest.toml"
+              echo "  Removed stale $pkg_dir/manifest.toml"
             fi
           done
         done <<< "$REPLACE_PATH_DEPS"
