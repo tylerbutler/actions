@@ -12,7 +12,7 @@ inputs:
     description: 'Tap repo in "owner/repo" form (e.g. "tylerbutler/homebrew-tap").'
     required: true
   plan:
-    description: 'dist plan JSON. Pass ${{ inputs.plan }} from the calling reusable workflow.'
+    description: 'dist plan JSON passed from the calling reusable workflow.'
     required: true
   artifact-pattern:
     description: 'Pattern for actions/download-artifact. Matches dist default.'
