@@ -92,6 +92,16 @@ runs:
               echo "Tag $tag already exists, skipping"
               continue
             fi
+            if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+              echo "Tag $tag already exists on origin, skipping"
+              continue
+            else
+              status=$?
+              if [ "$status" -ne 2 ]; then
+                echo "Failed to check whether tag $tag exists on origin" >&2
+                exit "$status"
+              fi
+            fi
             git tag "$tag"
             CREATED_TAGS="${CREATED_TAGS:+$CREATED_TAGS }$tag"
             echo "Created tag: $tag"
