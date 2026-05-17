@@ -27,9 +27,9 @@ Reusable composite actions for CI/CD workflows. Used across multiple repositorie
 
 From any repository:
 ```yaml
-- uses: tylerbutler/actions/setup-gleam@v1
-- uses: tylerbutler/actions/setup-rust@v1
-- uses: tylerbutler/actions/setup-node@v1
+- uses: tylerbutler/actions/setup-gleam@main
+- uses: tylerbutler/actions/setup-rust@main
+- uses: tylerbutler/actions/setup-node@main
 ```
 
 ## Structure
@@ -211,6 +211,4 @@ exclude = ["packages/my_lib_experimental"]
 
 ## Versioning
 
-- Use semantic versioning tags (v1, v1.0.0)
-- Major version tags (v1) should be updated to point to latest minor/patch
-- Breaking changes require major version bump
+This repo has no release process. Consumers pin to `@main`. There are no version tags.

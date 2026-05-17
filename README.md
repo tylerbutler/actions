@@ -9,7 +9,7 @@ Reusable composite actions for CI/CD workflows across repositories.
 Setup Gleam/BEAM environment with caching, optional Elixir, and optional JavaScript target support.
 
 ```yaml
-- uses: tylerbutler/actions/setup-gleam@v1
+- uses: tylerbutler/actions/setup-gleam@main
   with:
     node: 'true'  # Enable for JavaScript target
 ```
@@ -39,7 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: tylerbutler/actions/setup-gleam@v1
+      - uses: tylerbutler/actions/setup-gleam@main
       - run: just test
 ```
 
@@ -51,7 +51,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: tylerbutler/actions/setup-gleam@v1
+      - uses: tylerbutler/actions/setup-gleam@main
         with:
           erlang-version: '28.3'
           gleam-version: '1.14.0'
@@ -71,7 +71,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: tylerbutler/actions/setup-gleam@v1
+      - uses: tylerbutler/actions/setup-gleam@main
         with:
           cache: 'false'
 
@@ -91,7 +91,7 @@ jobs:
 Setup Rust toolchain with caching.
 
 ```yaml
-- uses: tylerbutler/actions/setup-rust@v1
+- uses: tylerbutler/actions/setup-rust@main
   with:
     components: 'rustfmt,clippy'
 ```
@@ -117,7 +117,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: tylerbutler/actions/setup-rust@v1
+      - uses: tylerbutler/actions/setup-rust@main
         with:
           components: 'rustfmt,clippy'
       - run: cargo test
@@ -128,7 +128,7 @@ jobs:
 Setup Node.js with package manager (pnpm, npm, yarn, or bun) and caching.
 
 ```yaml
-- uses: tylerbutler/actions/setup-node@v1
+- uses: tylerbutler/actions/setup-node@main
   with:
     package-manager: 'pnpm'
 ```
@@ -153,7 +153,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: tylerbutler/actions/setup-node@v1
+      - uses: tylerbutler/actions/setup-node@main
       - run: pnpm test
 ```
 
@@ -162,7 +162,7 @@ jobs:
 Setup Go environment with caching and optional [mise](https://mise.jdx.dev/) tool management.
 
 ```yaml
-- uses: tylerbutler/actions/setup-go@v1
+- uses: tylerbutler/actions/setup-go@main
   with:
     install-mise: 'true'  # Install tools from mise.toml
 ```
@@ -187,7 +187,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: tylerbutler/actions/setup-go@v1
+      - uses: tylerbutler/actions/setup-go@main
       - run: just test
 ```
 
@@ -199,7 +199,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: tylerbutler/actions/setup-go@v1
+      - uses: tylerbutler/actions/setup-go@main
         with:
           install-mise: 'true'
       - run: just ci
@@ -210,7 +210,7 @@ jobs:
 Install development tools via [taiki-e/install-action](https://github.com/taiki-e/install-action).
 
 ```yaml
-- uses: tylerbutler/actions/install-tools@v1
+- uses: tylerbutler/actions/install-tools@main
   with:
     tools: 'just,cargo-nextest'
 ```
@@ -228,7 +228,7 @@ Install development tools via [taiki-e/install-action](https://github.com/taiki-
 Batch [changie](https://changie.dev/) changelog entries and create a release pull request. Useful for automating releases in projects that use changie for changelog management.
 
 ```yaml
-- uses: tylerbutler/actions/changie-release@v1
+- uses: tylerbutler/actions/changie-release@main
 ```
 
 **Inputs:**
@@ -311,7 +311,7 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v6
-      - uses: tylerbutler/actions/changie-release@v1
+      - uses: tylerbutler/actions/changie-release@main
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 ```
@@ -319,7 +319,7 @@ jobs:
 **Example with custom templates:**
 
 ```yaml
-- uses: tylerbutler/actions/changie-release@v1
+- uses: tylerbutler/actions/changie-release@main
   with:
     version: minor
     pr-title-template: 'chore: release {version}'
@@ -333,7 +333,7 @@ jobs:
 Create a version tag from the latest [changie](https://changie.dev/) release. Designed to run when a release PR merges, triggering downstream tag-based workflows (e.g., GoReleaser).
 
 ```yaml
-- uses: tylerbutler/actions/changie-auto-tag@v1
+- uses: tylerbutler/actions/changie-auto-tag@main
 ```
 
 **Inputs:**
@@ -375,7 +375,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: tylerbutler/actions/changie-auto-tag@v1
+      - uses: tylerbutler/actions/changie-auto-tag@main
 ```
 
 ### changie-check
@@ -383,7 +383,7 @@ jobs:
 Check PRs for [changie](https://changie.dev/) changelog entries. Detects PR-added fragments, renders a preview using `changie batch --dry-run`, and reports whether a changelog entry is required based on conventional commit types.
 
 ```yaml
-- uses: tylerbutler/actions/changie-check@v1
+- uses: tylerbutler/actions/changie-check@main
   with:
     base-sha: ${{ github.event.pull_request.base.sha }}
     head-sha: ${{ github.event.pull_request.head.sha }}
@@ -420,7 +420,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: tylerbutler/actions/changie-check@v1
+      - uses: tylerbutler/actions/changie-check@main
         id: changelog
         with:
           base-sha: ${{ github.event.pull_request.base.sha }}
@@ -448,7 +448,7 @@ jobs:
 Parse a `workspace.toml` file and output structured package metadata for other actions. Designed as a "pre-step" that generates inputs for `gleam-publish`, `changie-release`, and `auto-tag` from a single source of truth.
 
 ```yaml
-- uses: tylerbutler/actions/read-gleam-workspace@v1
+- uses: tylerbutler/actions/read-gleam-workspace@main
   id: ws
 ```
 
@@ -492,9 +492,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: tylerbutler/actions/read-gleam-workspace@v1
+      - uses: tylerbutler/actions/read-gleam-workspace@main
         id: ws
-      - uses: tylerbutler/actions/setup-gleam@v1
+      - uses: tylerbutler/actions/setup-gleam@main
         with:
           cache: 'false'
       - uses: actions/cache@v4
@@ -504,7 +504,7 @@ jobs:
             ~/.cache/gleam
           key: gleam-${{ runner.os }}-${{ hashFiles(steps.ws.outputs.cache-hash-globs) }}
           restore-keys: gleam-${{ runner.os }}-
-      - uses: tylerbutler/actions/gleam-publish@v1
+      - uses: tylerbutler/actions/gleam-publish@main
         with:
           packages: ${{ steps.ws.outputs.packages }}
           replace-path-deps: |
@@ -524,11 +524,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: tylerbutler/actions/read-gleam-workspace@v1
+      - uses: tylerbutler/actions/read-gleam-workspace@main
         id: ws
         with:
           tag: ${{ github.ref_name }}
-      - uses: tylerbutler/actions/gleam-publish@v1
+      - uses: tylerbutler/actions/gleam-publish@main
         with:
           packages: ${{ steps.ws.outputs.tag-package-path }}
           replace-path-deps: |
@@ -539,9 +539,9 @@ jobs:
 **Example (release workflow using workspace):**
 
 ```yaml
-- uses: tylerbutler/actions/read-gleam-workspace@v1
+- uses: tylerbutler/actions/read-gleam-workspace@main
   id: ws
-- uses: tylerbutler/actions/changie-release@v1
+- uses: tylerbutler/actions/changie-release@main
   with:
     projects: ${{ steps.ws.outputs.projects }}
     version-files: ${{ steps.ws.outputs.version-files }}
@@ -563,10 +563,10 @@ Run a shell command sequentially in each package returned by `read-gleam-workspa
 This is intended as an **escape hatch** for workspace-wide tasks that do not justify a dedicated action or reusable workflow. For standard Gleam CI, prefer `gleam-workspace-ci.yml`.
 
 ```yaml
-- uses: tylerbutler/actions/read-gleam-workspace@v1
+- uses: tylerbutler/actions/read-gleam-workspace@main
   id: ws
 
-- uses: tylerbutler/actions/run-gleam-workspace@v1
+- uses: tylerbutler/actions/run-gleam-workspace@main
   with:
     packages: ${{ steps.ws.outputs.packages }}
     command: gleam deps download
@@ -583,10 +583,10 @@ This is intended as an **escape hatch** for workspace-wide tasks that do not jus
 **Example (refresh lockfiles in every package):**
 
 ```yaml
-- uses: tylerbutler/actions/read-gleam-workspace@v1
+- uses: tylerbutler/actions/read-gleam-workspace@main
   id: ws
 
-- uses: tylerbutler/actions/run-gleam-workspace@v1
+- uses: tylerbutler/actions/run-gleam-workspace@main
   with:
     packages: ${{ steps.ws.outputs.packages }}
     command: gleam deps download
@@ -597,7 +597,7 @@ This is intended as an **escape hatch** for workspace-wide tasks that do not jus
 Publish Gleam packages to [Hex.pm](https://hex.pm/) in dependency order. Designed for monorepos with multiple Gleam packages — publishes each package sequentially and gracefully skips versions that are already on Hex.
 
 ```yaml
-- uses: tylerbutler/actions/gleam-publish@v1
+- uses: tylerbutler/actions/gleam-publish@main
   with:
     packages: 'packages/core packages/utils packages/main'
     hex-api-key: ${{ secrets.HEXPM_API_KEY }}
@@ -620,7 +620,7 @@ In Gleam monorepos, sub-packages often depend on a root or sibling package via `
 The `replace-path-deps` input automates this. It accepts newline-separated entries in the format `dep-name:version-toml-path`:
 
 ```yaml
-- uses: tylerbutler/actions/gleam-publish@v1
+- uses: tylerbutler/actions/gleam-publish@main
   with:
     packages: >-
       .
@@ -650,10 +650,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: tylerbutler/actions/read-gleam-workspace@v1
+      - uses: tylerbutler/actions/read-gleam-workspace@main
         id: ws
-      - uses: tylerbutler/actions/setup-gleam@v1
-      - uses: tylerbutler/actions/gleam-publish@v1
+      - uses: tylerbutler/actions/setup-gleam@main
+      - uses: tylerbutler/actions/gleam-publish@main
         with:
           packages: ${{ steps.ws.outputs.packages }}
           replace-path-deps: |
@@ -669,8 +669,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: tylerbutler/actions/setup-gleam@v1
-      - uses: tylerbutler/actions/gleam-publish@v1
+      - uses: tylerbutler/actions/setup-gleam@main
+      - uses: tylerbutler/actions/gleam-publish@main
         with:
           packages: >-
             packages/core
@@ -685,7 +685,7 @@ jobs:
 **Example (single package):**
 
 ```yaml
-- uses: tylerbutler/actions/gleam-publish@v1
+- uses: tylerbutler/actions/gleam-publish@main
   with:
     packages: '.'
     hex-api-key: ${{ secrets.HEXPM_API_KEY }}
@@ -715,7 +715,7 @@ Reusable workflow for Gleam monorepos. It discovers packages from `workspace.tom
 ```yaml
 jobs:
   ci:
-    uses: tylerbutler/actions/.github/workflows/gleam-workspace-ci.yml@v1
+    uses: tylerbutler/actions/.github/workflows/gleam-workspace-ci.yml@main
     with:
       docs: true
 ```
@@ -752,7 +752,7 @@ When `cache` is enabled, each matrix job uses an explicit workspace-aware `actio
 ```yaml
 jobs:
   ci:
-    uses: tylerbutler/actions/.github/workflows/gleam-workspace-ci.yml@v1
+    uses: tylerbutler/actions/.github/workflows/gleam-workspace-ci.yml@main
     with:
       docs: true
 ```
@@ -762,7 +762,7 @@ jobs:
 ```yaml
 jobs:
   ci:
-    uses: tylerbutler/actions/.github/workflows/gleam-workspace-ci.yml@v1
+    uses: tylerbutler/actions/.github/workflows/gleam-workspace-ci.yml@main
     with:
       format-check: false
       check: false
@@ -830,7 +830,7 @@ jobs:
 Measure binary file sizes, compare against a cached baseline from the base branch, and output a markdown report. Language-agnostic — works with any build system that produces files.
 
 ```yaml
-- uses: tylerbutler/actions/binary-size@v1
+- uses: tylerbutler/actions/binary-size@main
   id: size
   with:
     paths: |
@@ -867,9 +867,9 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v6
-      - uses: tylerbutler/actions/setup-rust@v1
+      - uses: tylerbutler/actions/setup-rust@main
       - run: cargo build --release
-      - uses: tylerbutler/actions/binary-size@v1
+      - uses: tylerbutler/actions/binary-size@main
         id: size
         with:
           paths: |
@@ -886,7 +886,7 @@ jobs:
 
 ```yaml
 - run: go build -o build/ ./cmd/...
-- uses: tylerbutler/actions/binary-size@v1
+- uses: tylerbutler/actions/binary-size@main
   id: size
   with:
     paths: |
@@ -950,7 +950,7 @@ jobs:
     runs-on: ubuntu-22.04
     if: ${{ !fromJson(inputs.plan).announcement_is_prerelease || fromJson(inputs.plan).publish_prereleases }}
     steps:
-      - uses: tylerbutler/actions/publish-homebrew-formula@v1
+      - uses: tylerbutler/actions/publish-homebrew-formula@main
         with:
           app-id: ${{ secrets.HOMEBREW_TAP_APP_ID }}
           private-key: ${{ secrets.HOMEBREW_TAP_APP_PRIVATE_KEY }}
@@ -991,10 +991,10 @@ Use semantic versioning tags:
 
 ```yaml
 # Pin to major version (recommended)
-- uses: tylerbutler/actions/setup-gleam@v1
+- uses: tylerbutler/actions/setup-gleam@main
 
 # Pin to specific version
-- uses: tylerbutler/actions/setup-gleam@v1.0.0
+- uses: tylerbutler/actions/setup-gleam@main.0.0
 
 # Latest (not recommended for production)
 - uses: tylerbutler/actions/setup-gleam@main
