@@ -86,8 +86,22 @@ runs:
           echo "Dependency $dep_name: version $dep_version → \"$hex_range\""
 
           for pkg_dir in $PACKAGES; do
+            case "$pkg_dir" in
+              /*|*..*)
+                echo "::error::Invalid package path: $pkg_dir"
+                exit 1
+                ;;
+            esac
+
             toml="$pkg_dir/gleam.toml"
+            manifest="$pkg_dir/manifest.toml"
             [ ! -f "$toml" ] && continue
+
+            if [ -f "$manifest" ]; then
+              rm -f "$manifest"
+              echo "  Removed stale $manifest"
+            fi
+
             # Match path deps in any format: { path = "..." } with optional extra fields
             if grep -q "${dep_name} = { path = " "$toml"; then
               sed -i "s|${dep_name} = { path = \"[^\"]*\" }|${dep_name} = \"${hex_range}\"|" "$toml"
