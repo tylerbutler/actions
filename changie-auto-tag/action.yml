@@ -30,6 +30,22 @@ inputs:
     description: 'Create a GitHub Release from the tag with changie version notes'
     required: false
     default: false
+  wait-for-publish:
+    description: 'Wait for the downstream publish workflow to complete after each pushed tag'
+    required: false
+    default: 'false'
+  publish-workflow-name:
+    description: 'Workflow name to wait for when wait-for-publish is true'
+    required: false
+    default: 'Publish'
+  publish-wait-timeout-seconds:
+    description: 'Maximum seconds to wait for each tag publish workflow'
+    required: false
+    default: '1800'
+  publish-wait-poll-seconds:
+    description: 'Seconds between publish workflow status checks'
+    required: false
+    default: '15'
 
 outputs:
   version:
@@ -72,7 +88,75 @@ runs:
         PREFIX: ${{ inputs.tag-prefix }}
         PROJECTS: ${{ inputs.projects }}
         GITHUB_TOKEN: ${{ inputs.token }}
+        WAIT_FOR_PUBLISH: ${{ inputs.wait-for-publish }}
+        PUBLISH_WORKFLOW_NAME: ${{ inputs.publish-workflow-name }}
+        PUBLISH_WAIT_TIMEOUT_SECONDS: ${{ inputs.publish-wait-timeout-seconds }}
+        PUBLISH_WAIT_POLL_SECONDS: ${{ inputs.publish-wait-poll-seconds }}
+        GH_TOKEN: ${{ inputs.token }}
       run: |
+        wait_for_publish() {
+          tag="$1"
+          if [ "${WAIT_FOR_PUBLISH:-false}" != "true" ]; then
+            return 0
+          fi
+
+          echo "Waiting for publish workflow '$PUBLISH_WORKFLOW_NAME' for tag $tag"
+          start=$(date +%s)
+          timeout="${PUBLISH_WAIT_TIMEOUT_SECONDS:-1800}"
+          poll="${PUBLISH_WAIT_POLL_SECONDS:-15}"
+
+          while true; do
+            run_id=""
+            if runs=$(gh run list --workflow "$PUBLISH_WORKFLOW_NAME" --branch "$tag" --limit 1 --json databaseId,status,conclusion,headBranch 2>&1); then
+              if ! run_id=$(printf '%s' "$runs" | jq -r '.[0].databaseId // empty' 2>/dev/null); then
+                echo "Failed to parse publish workflow list for tag $tag; retrying" >&2
+                run_id=""
+              fi
+            else
+              echo "Failed to list publish workflow runs for tag $tag; retrying: $runs" >&2
+            fi
+            if [ -n "$run_id" ]; then
+              echo "Found publish workflow run $run_id for tag $tag"
+              break
+            fi
+            now=$(date +%s)
+            if [ $((now - start)) -ge "$timeout" ]; then
+              echo "Timed out waiting for publish workflow '$PUBLISH_WORKFLOW_NAME' for tag $tag" >&2
+              return 1
+            fi
+            sleep "$poll"
+          done
+
+          while true; do
+            if ! run=$(gh run view "$run_id" --json status,conclusion 2>&1); then
+              echo "Failed to read publish workflow run $run_id for tag $tag: $run" >&2
+              return 1
+            fi
+            if ! status=$(printf '%s' "$run" | jq -r '.status // empty' 2>/dev/null); then
+              echo "Failed to read publish workflow run $run_id for tag $tag" >&2
+              return 1
+            fi
+            if ! conclusion=$(printf '%s' "$run" | jq -r '.conclusion // empty' 2>/dev/null); then
+              echo "Failed to read publish workflow run $run_id for tag $tag" >&2
+              return 1
+            fi
+            if [ "$status" = "completed" ]; then
+              if [ "$conclusion" = "success" ]; then
+                echo "Publish workflow run $run_id for tag $tag completed successfully"
+                return 0
+              fi
+              echo "Publish workflow run $run_id for tag $tag completed with conclusion $conclusion" >&2
+              return 1
+            fi
+            now=$(date +%s)
+            if [ $((now - start)) -ge "$timeout" ]; then
+              echo "Timed out waiting for publish workflow '$PUBLISH_WORKFLOW_NAME' for tag $tag" >&2
+              return 1
+            fi
+            sleep "$poll"
+          done
+        }
+
         if [ -n "$PROJECTS" ]; then
           CREATED_TAGS=""
           ALL_VERSIONS=""
@@ -112,6 +196,7 @@ runs:
             # GitHub does not fire push events when >3 tags are pushed at once.
             for t in $CREATED_TAGS; do
               git push origin "$t"
+              wait_for_publish "$t" || exit $?
             done
           else
             echo "No new tags to push"
@@ -125,9 +210,26 @@ runs:
           tag="${PREFIX}${version}"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if git tag -l "$tag" | grep -q .; then
+            echo "Tag $tag already exists, skipping"
+            echo "created-tags=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+            echo "Tag $tag already exists on origin, skipping"
+            echo "created-tags=" >> "$GITHUB_OUTPUT"
+            exit 0
+          else
+            status=$?
+            if [ "$status" -ne 2 ]; then
+              echo "Failed to check whether tag $tag exists on origin" >&2
+              exit "$status"
+            fi
+          fi
           echo "created-tags=$tag" >> "$GITHUB_OUTPUT"
           git tag "$tag"
           git push origin "$tag"
+          wait_for_publish "$tag" || exit $?
         fi
 
     - name: Create GitHub Releases
@@ -142,6 +244,11 @@ runs:
         CHANGES_DIR: ${{ steps.config.outputs.changes-dir }}
         SEPARATOR: ${{ steps.config.outputs.separator }}
       run: |
+        if [ -z "$CREATED_TAGS" ]; then
+          echo "No newly-created tag needs a release"
+          exit 0
+        fi
+
         if [ -n "$PROJECTS" ]; then
           # Multi-project: create a release for each newly-created tag
           IFS=',' read -ra PROJECT_LIST <<< "$PROJECTS"

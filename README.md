@@ -343,15 +343,21 @@ Create a version tag from the latest [changie](https://changie.dev/) release. De
 | `changie-version` | `latest` | Changie CLI version to install |
 | `working-directory` | `.` | Directory containing `.changie.yaml` |
 | `tag-prefix` | `''` | Prefix for the git tag (`changie latest` already includes `v`) |
+| `projects` | `''` | Comma-separated changie project keys for multi-package repos |
 | `token` | `${{ github.token }}` | GitHub token for pushing the tag |
 | `create-release` | `false` | Create a GitHub Release with changie version notes |
+| `wait-for-publish` | `false` | Wait for the downstream publish workflow after each pushed tag |
+| `publish-workflow-name` | `Publish` | Workflow to wait for when `wait-for-publish` is `true` |
+| `publish-wait-timeout-seconds` | `1800` | Maximum seconds to wait for each tag publish workflow |
+| `publish-wait-poll-seconds` | `15` | Seconds between publish workflow status checks |
 
 **Outputs:**
 
 | Output | Description |
 |--------|-------------|
-| `version` | Version from `changie latest` |
-| `tag` | Full tag that was created (e.g., `v1.2.3`) |
+| `version` | Version(s) from `changie latest` |
+| `tag` | Full tag(s) that were created |
+| `created-tags` | Space-separated list of tags actually created |
 
 **Example (auto-tag on release PR merge):**
 
@@ -753,6 +759,21 @@ jobs:
     uses: tylerbutler/actions/.github/workflows/auto-tag.yml@main
 ```
 
+For monorepos where each tag triggers a package publish workflow, set `wait-for-publish: true` on the reusable `auto-tag.yml` workflow. This makes auto-tag push one tag, wait for the configured publish workflow to succeed for that tag, and only then push the next tag. This preserves dependency order for packages that must be published to a registry before dependents can resolve them.
+
+**Example (workspace auto-tag with ordered package publishing):**
+
+```yaml
+jobs:
+  auto-tag:
+    uses: tylerbutler/actions/.github/workflows/auto-tag.yml@main
+    with:
+      workspace-file: workspace.toml
+      create-release: true
+      wait-for-publish: true
+      publish-workflow-name: Publish
+```
+
 **Inputs:**
 
 | Input | Default | Description |
@@ -760,14 +781,21 @@ jobs:
 | `changie-version` | `latest` | Changie CLI version to install |
 | `working-directory` | `.` | Directory containing `.changie.yaml` |
 | `tag-prefix` | `''` | Prefix for the git tag (`changie latest` already includes `v`) |
+| `projects` | `''` | Comma-separated changie project keys for multi-package repos |
+| `workspace-file` | `''` | Path to `workspace.toml` relative to `working-directory`; overrides `projects` |
 | `create-release` | `false` | Create a GitHub Release with changie version notes |
+| `wait-for-publish` | `false` | Wait for the downstream publish workflow after each pushed tag |
+| `publish-workflow-name` | `Publish` | Workflow to wait for when `wait-for-publish` is `true` |
+| `publish-wait-timeout-seconds` | `1800` | Maximum seconds to wait for each tag publish workflow |
+| `publish-wait-poll-seconds` | `15` | Seconds between publish workflow status checks |
 
 **Outputs:**
 
 | Output | Description |
 |--------|-------------|
-| `version` | Version from `changie latest` |
-| `tag` | Full tag that was created |
+| `version` | Version(s) from `changie latest` |
+| `tag` | Full tag(s) that were created |
+| `created-tags` | Space-separated list of tags actually created |
 
 ### binary-size
 
