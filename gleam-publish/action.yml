@@ -95,11 +95,17 @@ runs:
 
             toml="$pkg_dir/gleam.toml"
             manifest="$pkg_dir/manifest.toml"
+            build_dir="$pkg_dir/build"
             [ ! -f "$toml" ] && continue
 
             if [ -f "$manifest" ]; then
               rm -f "$manifest"
               echo "  Removed stale $manifest"
+            fi
+
+            if [ -d "$build_dir" ]; then
+              rm -rf "$build_dir"
+              echo "  Removed stale $build_dir"
             fi
 
             # Match path deps in any format: { path = "..." } with optional extra fields

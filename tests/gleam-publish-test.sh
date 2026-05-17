@@ -27,8 +27,8 @@ assert_file_contains() {
   fi
 }
 
-test_removes_stale_manifest_when_rewriting_path_deps() {
-  mkdir -p "$tmp/packages/core" "$tmp/packages/app" "$tmp/packages/other"
+test_removes_stale_manifest_and_build_when_rewriting_path_deps() {
+  mkdir -p "$tmp/packages/core" "$tmp/packages/app/build/packages/core" "$tmp/packages/other/build"
 
   cat > "$tmp/packages/core/gleam.toml" <<'TOML'
 name = "core"
@@ -50,6 +50,11 @@ packages = [
 
 [requirements]
 core = { path = "../core" }
+TOML
+
+  cat > "$tmp/packages/app/build/packages/core/gleam.toml" <<'TOML'
+name = "core"
+version = "1.2.3"
 TOML
 
   cat > "$tmp/packages/other/gleam.toml" <<'TOML'
@@ -80,8 +85,18 @@ TOML
     exit 1
   fi
 
+  if [ -e "$tmp/packages/app/build" ]; then
+    echo "Expected stale build directory to be removed after rewriting a path dependency" >&2
+    exit 1
+  fi
+
   if [ -e "$tmp/packages/other/manifest.toml" ]; then
     echo "Expected stale manifest.toml to be removed from packages without matching path deps" >&2
+    exit 1
+  fi
+
+  if [ -e "$tmp/packages/other/build" ]; then
+    echo "Expected stale build directory to be removed from packages without matching path deps" >&2
     exit 1
   fi
 }
@@ -132,5 +147,5 @@ TOML
   fi
 }
 
-test_removes_stale_manifest_when_rewriting_path_deps
+test_removes_stale_manifest_and_build_when_rewriting_path_deps
 test_rejects_package_path_traversal_before_removing_manifest
