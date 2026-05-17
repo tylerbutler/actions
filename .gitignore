@@ -3,9 +3,17 @@
 .vscode/
 *.swp
 
+# Claude Code local state
+.claude/settings.local.json
+
 # OS
 .DS_Store
 Thumbs.db
 
 # Node (if testing locally)
 node_modules/
+
+# Python (if running action scripts/tests locally)
+__pycache__/
+*.pyc
+.pytest_cache/
