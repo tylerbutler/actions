@@ -469,6 +469,8 @@ exclude = ["packages/my_lib_experimental"]
 |-------|---------|-------------|
 | `working-directory` | `.` | Repository root directory |
 | `workspace-file` | `workspace.toml` | Path to workspace config (relative to working-directory) |
+| `tag` | `''` | Optional tag name to map to a workspace package |
+| `tag-prefix` | `''` | Optional prefix to strip before matching `tag` to package name |
 
 **Outputs:**
 
@@ -479,6 +481,8 @@ exclude = ["packages/my_lib_experimental"]
 | `version-files` | Newline-separated `name:path/gleam.toml:version` entries (for `changie-release`) |
 | `packages-json` | JSON array of `{name, path, version}` objects |
 | `cache-hash-globs` | Comma-separated paths for `hashFiles()` in cache keys |
+| `tag-package` | Workspace package name matched by `tag` |
+| `tag-package-path` | Workspace package path matched by `tag` |
 
 **Example (full publish workflow using workspace):**
 
@@ -503,6 +507,30 @@ jobs:
       - uses: tylerbutler/actions/gleam-publish@v1
         with:
           packages: ${{ steps.ws.outputs.packages }}
+          replace-path-deps: |
+            my_lib:gleam.toml
+          hex-api-key: ${{ secrets.HEXPM_API_KEY }}
+```
+
+**Example (tag-scoped publish workflow):**
+
+Use `tag` when each pushed package tag should publish only that package. For a
+tag like `lattice_counters-v1.1.0`, `tag-package-path` will contain the matching
+workspace path, such as `packages/lattice_counters`.
+
+```yaml
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: tylerbutler/actions/read-gleam-workspace@v1
+        id: ws
+        with:
+          tag: ${{ github.ref_name }}
+      - uses: tylerbutler/actions/gleam-publish@v1
+        with:
+          packages: ${{ steps.ws.outputs.tag-package-path }}
           replace-path-deps: |
             my_lib:gleam.toml
           hex-api-key: ${{ secrets.HEXPM_API_KEY }}
