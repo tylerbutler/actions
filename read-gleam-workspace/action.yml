@@ -10,6 +10,14 @@ inputs:
     description: 'Path to workspace config file (relative to working-directory)'
     required: false
     default: 'workspace.toml'
+  tag:
+    description: 'Optional tag name to map to a workspace package path'
+    required: false
+    default: ''
+  tag-prefix:
+    description: 'Optional prefix to strip before matching tag to package name'
+    required: false
+    default: ''
 
 outputs:
   packages:
@@ -27,6 +35,12 @@ outputs:
   cache-hash-globs:
     description: 'Comma-separated gleam.toml and manifest.toml paths for cache hashFiles()'
     value: ${{ steps.parse.outputs.cache-hash-globs }}
+  tag-package:
+    description: 'Workspace package name matched by the tag input'
+    value: ${{ steps.parse.outputs.tag-package }}
+  tag-package-path:
+    description: 'Workspace package path matched by the tag input'
+    value: ${{ steps.parse.outputs.tag-package-path }}
 
 runs:
   using: composite
@@ -37,6 +51,8 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       env:
         WORKSPACE_FILE: ${{ inputs.workspace-file }}
+        TAG_NAME: ${{ inputs.tag }}
+        TAG_PREFIX: ${{ inputs.tag-prefix }}
       run: |
         if [ ! -f "$WORKSPACE_FILE" ]; then
           echo "::error::Workspace file not found: $WORKSPACE_FILE"
