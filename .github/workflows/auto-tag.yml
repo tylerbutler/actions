@@ -33,6 +33,26 @@ on:
         required: false
         type: boolean
         default: false
+      wait-for-publish:
+        description: 'Wait for the downstream publish workflow to complete after each pushed tag'
+        required: false
+        type: boolean
+        default: false
+      publish-workflow-name:
+        description: 'Workflow name to wait for when wait-for-publish is true'
+        required: false
+        type: string
+        default: 'Publish'
+      publish-wait-timeout-seconds:
+        description: 'Maximum seconds to wait for each tag publish workflow'
+        required: false
+        type: string
+        default: '1800'
+      publish-wait-poll-seconds:
+        description: 'Seconds between publish workflow status checks'
+        required: false
+        type: string
+        default: '15'
     outputs:
       version:
         description: 'The version(s) from changie latest'
@@ -53,6 +73,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   tag:
@@ -93,4 +114,8 @@ jobs:
           tag-prefix: ${{ inputs.tag-prefix }}
           projects: ${{ steps.workspace.outputs.projects || inputs.projects }}
           create-release: ${{ inputs.create-release }}
+          wait-for-publish: ${{ inputs.wait-for-publish }}
+          publish-workflow-name: ${{ inputs.publish-workflow-name }}
+          publish-wait-timeout-seconds: ${{ inputs.publish-wait-timeout-seconds }}
+          publish-wait-poll-seconds: ${{ inputs.publish-wait-poll-seconds }}
           token: ${{ steps.app-token.outputs.token || github.token }}
