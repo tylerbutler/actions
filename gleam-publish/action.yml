@@ -54,129 +54,18 @@ runs:
     - name: Rewrite path dependencies
       if: inputs.replace-path-deps != ''
       shell: bash
-      working-directory: ${{ inputs.working-directory }}
       env:
         REPLACE_PATH_DEPS: ${{ inputs.replace-path-deps }}
         PACKAGES: ${{ inputs.packages }}
-      run: |
-        while IFS= read -r line; do
-          [ -z "$line" ] && continue
-          dep_name=$(echo "$line" | cut -d: -f1 | xargs)
-          version_toml=$(echo "$line" | cut -d: -f2 | xargs)
-
-          if [ ! -f "$version_toml" ]; then
-            echo "::error::Version source file not found: $version_toml"
-            exit 1
-          fi
-
-          dep_version=$(grep '^version' "$version_toml" | head -1 | sed 's/version = "\(.*\)"/\1/')
-          major=$(echo "$dep_version" | cut -d. -f1)
-          minor=$(echo "$dep_version" | cut -d. -f2)
-
-          if [ "$major" -eq 0 ]; then
-            # Pre-1.0: minor version is the compatibility boundary
-            next_minor=$((minor + 1))
-            hex_range=">= $dep_version and < 0.$next_minor.0"
-          else
-            # Post-1.0: major version is the compatibility boundary
-            next_major=$((major + 1))
-            hex_range=">= $dep_version and < $next_major.0.0"
-          fi
-
-          echo "Dependency $dep_name: version $dep_version → \"$hex_range\""
-
-          for pkg_dir in $PACKAGES; do
-            case "$pkg_dir" in
-              /*|*..*)
-                echo "::error::Invalid package path: $pkg_dir"
-                exit 1
-                ;;
-            esac
-
-            toml="$pkg_dir/gleam.toml"
-            manifest="$pkg_dir/manifest.toml"
-            build_dir="$pkg_dir/build"
-            [ ! -f "$toml" ] && continue
-
-            if [ -f "$manifest" ]; then
-              rm -f "$manifest"
-              echo "  Removed stale $manifest"
-            fi
-
-            if [ -d "$build_dir" ]; then
-              rm -rf "$build_dir"
-              echo "  Removed stale $build_dir"
-            fi
-
-            # Match path deps in any format: { path = "..." } with optional extra fields
-            if grep -q "${dep_name} = { path = " "$toml"; then
-              sed -i "s|${dep_name} = { path = \"[^\"]*\" }|${dep_name} = \"${hex_range}\"|" "$toml"
-              echo "  Rewrote $toml"
-            fi
-          done
-        done <<< "$REPLACE_PATH_DEPS"
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      run: python3 "$GITHUB_ACTION_PATH/gleam_publish.py" rewrite-path-deps
 
     - name: Publish packages
       id: publish
       shell: bash
-      working-directory: ${{ inputs.working-directory }}
       env:
         HEXPM_API_KEY: ${{ inputs.hex-api-key }}
         PACKAGES: ${{ inputs.packages }}
         SKIP_PUBLISHED: ${{ inputs.skip-already-published }}
-      run: |
-        PUBLISHED=""
-        SKIPPED=""
-        FAILED=""
-
-        for pkg_dir in $PACKAGES; do
-          if [ ! -d "$pkg_dir" ]; then
-            echo "::error::Package directory not found: $pkg_dir"
-            FAILED="${FAILED:+$FAILED }$pkg_dir"
-            continue
-          fi
-
-          # Extract package name and version from gleam.toml
-          pkg_name=$(grep '^name' "$pkg_dir/gleam.toml" | head -1 | sed 's/name = "\(.*\)"/\1/')
-          pkg_version=$(grep '^version' "$pkg_dir/gleam.toml" | head -1 | sed 's/version = "\(.*\)"/\1/')
-          echo "::group::$pkg_name@$pkg_version ($pkg_dir)"
-
-          # Attempt to publish
-          pushd "$pkg_dir" > /dev/null
-          if output=$(gleam publish --yes 2>&1); then
-            echo "$output"
-            echo "✓ Published $pkg_name@$pkg_version"
-            PUBLISHED="${PUBLISHED:+$PUBLISHED }$pkg_dir"
-          else
-            if echo "$output" | grep -qi "already published\|already exists\|version already"; then
-              echo "$output"
-              if [ "$SKIP_PUBLISHED" = "true" ]; then
-                echo "· Skipped $pkg_name@$pkg_version (already published)"
-                SKIPPED="${SKIPPED:+$SKIPPED }$pkg_dir"
-              else
-                echo "::error::$pkg_name@$pkg_version is already published"
-                FAILED="${FAILED:+$FAILED }$pkg_dir"
-              fi
-            else
-              echo "$output"
-              echo "::error::Failed to publish $pkg_name@$pkg_version"
-              FAILED="${FAILED:+$FAILED }$pkg_dir"
-            fi
-          fi
-          popd > /dev/null
-          echo "::endgroup::"
-        done
-
-        echo "published=$PUBLISHED" >> "$GITHUB_OUTPUT"
-        echo "skipped=$SKIPPED" >> "$GITHUB_OUTPUT"
-
-        # Summary
-        echo "### Publish Results" >> "$GITHUB_STEP_SUMMARY"
-        [ -n "$PUBLISHED" ] && echo "- **Published:** $PUBLISHED" >> "$GITHUB_STEP_SUMMARY"
-        [ -n "$SKIPPED" ] && echo "- **Skipped:** $SKIPPED" >> "$GITHUB_STEP_SUMMARY"
-        [ -n "$FAILED" ] && echo "- **Failed:** $FAILED" >> "$GITHUB_STEP_SUMMARY"
-
-        if [ -n "$FAILED" ]; then
-          echo "::error::Some packages failed to publish: $FAILED"
-          exit 1
-        fi
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      run: python3 "$GITHUB_ACTION_PATH/gleam_publish.py" publish
