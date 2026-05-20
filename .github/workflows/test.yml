@@ -80,9 +80,15 @@ jobs:
           go-version-file: tests/fixtures/setup-go/go.mod
           run-deps: 'false'
           cache: 'false'
+          install-mise: 'true'
       - name: setup-go assertion
         if: matrix.action == 'setup-go'
         run: go version
+      - name: setup-go mise assertion
+        if: matrix.action == 'setup-go'
+        shell: bash
+        working-directory: tests/fixtures/setup-go
+        run: mise exec -- jq --version
 
       - name: setup-rust smoke
         if: matrix.action == 'setup-rust'
