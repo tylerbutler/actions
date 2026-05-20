@@ -23,7 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "_common"))
 
-from gha import append_summary, fail, write_output  # noqa: E402
+from gha import append_summary, fail, parse_colon_entries, write_output  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -51,17 +51,14 @@ def hex_range(version: str) -> str:
 
 def parse_replace_path_deps(text: str) -> list[tuple[str, str]]:
     """Parse `dep-name:version-toml-path` entries, ignoring blank lines."""
+    try:
+        raw_entries = parse_colon_entries(text, fields=2)
+    except ValueError as e:
+        raise ValueError(f"Invalid entry: expected 'dep-name:version-toml-path' ({e})") from e
     out: list[tuple[str, str]] = []
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line:
-            continue
-        if ":" not in line:
-            raise ValueError(f"Invalid entry {raw!r}: expected 'dep-name:version-toml-path'")
-        dep, path = line.split(":", 1)
-        dep, path = dep.strip(), path.strip()
+    for dep, path in raw_entries:
         if not dep or not path:
-            raise ValueError(f"Invalid entry {raw!r}: empty field")
+            raise ValueError(f"Invalid entry {dep!r}:{path!r}: empty field")
         out.append((dep, path))
     return out
 

@@ -27,7 +27,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "_common"))
 
-from gha import fail, update_toml_top_level_key, write_output  # noqa: E402
+from gha import fail, parse_colon_entries, update_toml_top_level_key, write_output  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -77,19 +77,17 @@ def parse_version_files(text: str, multi_project: bool) -> list[dict[str, str | 
     Single-project format: `path:key` per line.
     Multi-project format:  `project:path:key` per line.
     """
-    entries: list[dict[str, str | None]] = []
     expected = 3 if multi_project else 2
     label = "project:path:key" if multi_project else "path:key"
+    try:
+        raw_entries = parse_colon_entries(text, fields=expected)
+    except ValueError as e:
+        raise ValueError(f"Invalid entry: expected {label!r} ({e})") from e
 
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        parts = [p.strip() for p in line.split(":")]
-        if len(parts) != expected or not all(parts):
-            raise ValueError(
-                f"Invalid entry {raw_line!r}: expected {label!r}"
-            )
+    entries: list[dict[str, str | None]] = []
+    for parts in raw_entries:
+        if not all(parts):
+            raise ValueError(f"Invalid entry {':'.join(parts)!r}: empty field, expected {label!r}")
         if multi_project:
             entries.append({"project": parts[0], "path": parts[1], "key": parts[2]})
         else:

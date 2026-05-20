@@ -22,23 +22,19 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "_common"))
 
-from gha import fail, update_toml_top_level_key  # noqa: E402
+from gha import fail, parse_colon_entries, update_toml_top_level_key  # noqa: E402
 
 
 def parse_entries(text: str) -> list[tuple[str, str]]:
     """Parse newline-separated `path:key` entries, ignoring blank lines."""
+    try:
+        raw_entries = parse_colon_entries(text, fields=2)
+    except ValueError as e:
+        raise ValueError(f"Invalid entry: expected 'path:key' ({e})") from e
     entries: list[tuple[str, str]] = []
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        if ":" not in line:
-            raise ValueError(f"Invalid entry {raw_line!r}: expected 'path:key'")
-        path, key = line.split(":", 1)
-        path = path.strip()
-        key = key.strip()
+    for path, key in raw_entries:
         if not path or not key:
-            raise ValueError(f"Invalid entry {raw_line!r}: empty path or key")
+            raise ValueError(f"Invalid entry {path!r}:{key!r}: empty path or key")
         entries.append((path, key))
     return entries
 
