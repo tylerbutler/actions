@@ -18,7 +18,10 @@ import os
 import shutil
 import sys
 from pathlib import Path
-from typing import NoReturn
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "_common"))
+
+from gha import fail, write_output  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -159,25 +162,6 @@ def generate_report(
 # ---------------------------------------------------------------------------
 
 
-def _write_output(key: str, value: str) -> None:
-    out_file = os.environ.get("GITHUB_OUTPUT")
-    if "\n" in value:
-        sentinel = f"EOF_{key.upper().replace('-', '_')}"
-        block = f"{key}<<{sentinel}\n{value}\n{sentinel}\n"
-    else:
-        block = f"{key}={value}\n"
-    if out_file:
-        with open(out_file, "a", encoding="utf-8") as f:
-            f.write(block)
-    else:
-        sys.stdout.write(block)
-
-
-def _fail(message: str) -> NoReturn:
-    print(f"::error::{message}", file=sys.stderr)
-    sys.exit(1)
-
-
 # ---------------------------------------------------------------------------
 # Subcommands
 # ---------------------------------------------------------------------------
@@ -194,8 +178,8 @@ def cmd_cache_keys() -> None:
     save_safe = sanitize_branch(save_branch)
     base_safe = sanitize_branch(base_branch)
 
-    _write_output("save-key", f"{prefix}-{save_safe}-{paths_hash}-{sha}")
-    _write_output("restore-prefix", f"{prefix}-{base_safe}-{paths_hash}-")
+    write_output("save-key", f"{prefix}-{save_safe}-{paths_hash}-{sha}")
+    write_output("restore-prefix", f"{prefix}-{base_safe}-{paths_hash}-")
 
 
 def cmd_measure_and_report() -> None:
@@ -216,7 +200,7 @@ def cmd_measure_and_report() -> None:
         try:
             baseline = json.loads(baseline_file.read_text(encoding="utf-8"))
         except json.JSONDecodeError as e:
-            _fail(f"Failed to parse baseline cache: {e}")
+            fail(f"Failed to parse baseline cache: {e}")
         print("Baseline loaded from cache")
     else:
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -231,11 +215,11 @@ def cmd_measure_and_report() -> None:
 
     report, total_delta = generate_report(sizes, baseline, base_branch)
 
-    _write_output("has-baseline", "true" if has_baseline else "false")
-    _write_output("total-size", str(total))
-    _write_output("sizes-json", json.dumps(sizes))
-    _write_output("total-delta", str(total_delta))
-    _write_output("report", report)
+    write_output("has-baseline", "true" if has_baseline else "false")
+    write_output("total-size", str(total))
+    write_output("sizes-json", json.dumps(sizes))
+    write_output("total-delta", str(total_delta))
+    write_output("report", report)
 
 
 # ---------------------------------------------------------------------------
