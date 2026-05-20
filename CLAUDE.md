@@ -12,6 +12,7 @@ Reusable composite actions for CI/CD workflows. Used across multiple repositorie
 | `setup-go` | Go environment with optional mise tool management |
 | `setup-rust` | Rust toolchain with caching |
 | `setup-node` | Node.js with pnpm/npm/yarn/bun |
+| `mise-setup` | Install mise and project-declared/ad-hoc tools; used standalone or by `setup-go` via `install-mise` |
 | `install-tools` | Install dev tools via taiki-e |
 | `changie-release` | Batch changie entries and create release PR (single or multi-project) |
 | `changie-auto-tag` | Create version tag(s) from latest changie release (single or multi-project) |
@@ -44,6 +45,8 @@ actions/
 │   └── action.yml      # Rust toolchain setup
 ├── setup-node/
 │   └── action.yml      # Node.js setup
+├── mise-setup/
+│   └── action.yml      # mise + tool installation (standalone or via setup-go's install-mise)
 ├── install-tools/
 │   └── action.yml      # Generic tool installer
 ├── changie-release/
