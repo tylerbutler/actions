@@ -23,9 +23,11 @@ import os
 import re
 import subprocess
 import sys
-import tomllib
 from pathlib import Path
-from typing import NoReturn
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "_common"))
+
+from gha import fail, update_toml_top_level_key, write_output  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -67,37 +69,6 @@ def strip_version_prefix(version: str, project: str = "", separator: str = "") -
         if version.startswith(prefix):
             return version[len(prefix):]
     return version.removeprefix("v")
-
-
-def update_toml_top_level_key(content: str, key: str, new_value: str) -> str:
-    """Replace the top-level `key = "..."` string assignment in `content`.
-
-    Mirrors the implementation in update-version-files/update_version_files.py.
-    See that file's tests for the full edge-case matrix. Duplicated here so each
-    composite action stays self-contained.
-    """
-    data = tomllib.loads(content)
-    if key not in data:
-        raise KeyError(f"Top-level key {key!r} not found")
-    if not isinstance(data[key], str):
-        raise TypeError(f"Top-level key {key!r} is not a string value")
-
-    section_header = re.search(r"^[ \t]*\[", content, re.MULTILINE)
-    end = section_header.start() if section_header else len(content)
-    head, tail = content[:end], content[end:]
-
-    pattern = re.compile(
-        rf'^({re.escape(key)}[ \t]*=[ \t]*)"[^"\n]*"',
-        re.MULTILINE,
-    )
-    new_head, count = pattern.subn(
-        lambda m: f'{m.group(1)}"{new_value}"', head
-    )
-    if count != 1:
-        raise ValueError(
-            f"Expected exactly one top-level {key!r} assignment, found {count}"
-        )
-    return new_head + tail
 
 
 def parse_version_files(text: str, multi_project: bool) -> list[dict[str, str | None]]:
@@ -161,26 +132,6 @@ def aggregate_changelog(
 # ---------------------------------------------------------------------------
 
 
-def _write_output(key: str, value: str) -> None:
-    """Append `key=value` (or heredoc block) to GITHUB_OUTPUT, or print locally."""
-    out_file = os.environ.get("GITHUB_OUTPUT")
-    if "\n" in value:
-        sentinel = f"EOF_{re.sub(r'[^A-Z0-9]', '_', key.upper())}"
-        block = f"{key}<<{sentinel}\n{value}\n{sentinel}\n"
-    else:
-        block = f"{key}={value}\n"
-    if out_file:
-        with open(out_file, "a", encoding="utf-8") as f:
-            f.write(block)
-    else:
-        sys.stdout.write(block)
-
-
-def _fail(message: str) -> NoReturn:
-    print(f"::error::{message}", file=sys.stderr)
-    sys.exit(1)
-
-
 def _load_changie_config(working_dir: Path) -> dict[str, str]:
     path = working_dir / ".changie.yaml"
     if path.is_file():
@@ -203,9 +154,9 @@ def cmd_check_config() -> None:
     projects = os.environ.get("PROJECTS", "").strip()
     config = _load_changie_config(cwd)
 
-    _write_output("changes-dir", config["changesDir"])
-    _write_output("separator", config["projectsVersionSeparator"] if projects else "")
-    _write_output("has-projects", "true" if projects else "false")
+    write_output("changes-dir", config["changesDir"])
+    write_output("separator", config["projectsVersionSeparator"] if projects else "")
+    write_output("has-projects", "true" if projects else "false")
 
     unreleased_path = cwd / config["changesDir"] / config["unreleasedDir"]
     fragments = (
@@ -213,10 +164,10 @@ def cmd_check_config() -> None:
     )
     if fragments:
         print(f"Found {len(fragments)} unreleased change fragment(s)")
-        _write_output("skipped", "false")
+        write_output("skipped", "false")
     else:
         print(f"No unreleased change fragments found in {unreleased_path}")
-        _write_output("skipped", "true")
+        write_output("skipped", "true")
 
 
 def _changie_latest(project: str | None, cwd: Path) -> str:
@@ -241,8 +192,8 @@ def cmd_resolve_versions() -> None:
     if projects:
         batched = _split_csv(os.environ.get("BATCHED", ""))
         if not batched:
-            _write_output("version", "")
-            _write_output("versions-json", "{}")
+            write_output("version", "")
+            write_output("versions-json", "{}")
             return
         versions: dict[str, str] = {}
         for project in batched:
@@ -250,11 +201,11 @@ def cmd_resolve_versions() -> None:
             if ver:
                 versions[project] = ver
         ordered = [versions[p] for p in batched if p in versions]
-        _write_output("version", ", ".join(ordered))
-        _write_output("versions-json", json.dumps(versions))
+        write_output("version", ", ".join(ordered))
+        write_output("versions-json", json.dumps(versions))
     else:
-        _write_output("version", _changie_latest(None, cwd))
-        _write_output("versions-json", "{}")
+        write_output("version", _changie_latest(None, cwd))
+        write_output("versions-json", "{}")
 
 
 def cmd_bump_files() -> None:
@@ -270,14 +221,14 @@ def cmd_bump_files() -> None:
     try:
         entries = parse_version_files(version_files_text, multi_project=multi)
     except ValueError as e:
-        _fail(str(e))
+        fail(str(e))
 
     if multi:
         batched = set(_split_csv(os.environ.get("BATCHED", "")))
         try:
             versions = json.loads(os.environ.get("VERSIONS_JSON") or "{}")
         except json.JSONDecodeError as e:
-            _fail(f"Invalid VERSIONS_JSON: {e}")
+            fail(f"Invalid VERSIONS_JSON: {e}")
         separator = os.environ.get("SEPARATOR", "-")
 
         for entry in entries:
@@ -299,12 +250,12 @@ def cmd_bump_files() -> None:
 
 def _apply_bump(path: Path, key: str, value: str) -> None:
     if not path.is_file():
-        _fail(f"Version file not found: {path}")
+        fail(f"Version file not found: {path}")
     try:
         content = path.read_text(encoding="utf-8")
         new_content = update_toml_top_level_key(content, key, value)
     except (KeyError, TypeError, ValueError, tomllib.TOMLDecodeError) as e:
-        _fail(f"Failed to update {path}: {e}")
+        fail(f"Failed to update {path}: {e}")
     if new_content != content:
         path.write_text(new_content, encoding="utf-8")
     print(f'Updated {path}: {key} = "{value}"')
@@ -330,7 +281,7 @@ def cmd_read_changelog() -> None:
         ver_file = changes_path / f"{version}.md"
         content = ver_file.read_text(encoding="utf-8") if ver_file.is_file() else ""
 
-    _write_output("content", content)
+    write_output("content", content)
 
 
 def cmd_resolve_templates() -> None:
@@ -340,19 +291,19 @@ def cmd_resolve_templates() -> None:
     branch_version = "next" if has_projects else version
     changelog = os.environ.get("CHANGELOG", "")
 
-    _write_output(
+    write_output(
         "pr-title",
         resolve_template(os.environ.get("TITLE_TPL", ""), version=version),
     )
-    _write_output(
+    write_output(
         "commit-message",
         resolve_template(os.environ.get("COMMIT_TPL", ""), version=version),
     )
-    _write_output(
+    write_output(
         "branch",
         resolve_template(os.environ.get("BRANCH_TPL", ""), version=branch_version),
     )
-    _write_output(
+    write_output(
         "pr-body",
         resolve_template(
             os.environ.get("BODY_TPL", ""), version=version, changelog=changelog
