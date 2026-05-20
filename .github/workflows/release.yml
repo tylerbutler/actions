@@ -1,0 +1,225 @@
+name: Release
+
+on:
+  workflow_call:
+    inputs:
+      publish-to:
+        description: 'Comma-separated publish targets. Supported: hex, homebrew.'
+        required: false
+        type: string
+        default: ''
+      working-directory:
+        description: 'Directory containing .changie.yaml and release metadata'
+        required: false
+        type: string
+        default: '.'
+      changie-version:
+        description: 'Changie CLI version to install'
+        required: false
+        type: string
+        default: 'latest'
+      projects:
+        description: 'Comma-separated changie project keys'
+        required: false
+        type: string
+        default: ''
+      workspace-file:
+        description: 'Path to workspace.toml, relative to working-directory. Overrides projects when set.'
+        required: false
+        type: string
+        default: ''
+      version:
+        description: 'Version to batch: auto, major, minor, patch, or explicit semver. Ignored when projects is set.'
+        required: false
+        type: string
+        default: 'auto'
+      version-files:
+        description: 'Version files forwarded to changie-release'
+        required: false
+        type: string
+        default: ''
+      post-batch-command:
+        description: 'Command to run after changie batch and version bumps'
+        required: false
+        type: string
+        default: ''
+      release-label:
+        description: 'Label identifying release PRs for tag creation'
+        required: false
+        type: string
+        default: 'release'
+      labels:
+        description: 'Labels applied to release PRs created by changie-release'
+        required: false
+        type: string
+        default: 'release'
+      pr-title-template:
+        description: 'Release PR title template'
+        required: false
+        type: string
+        default: 'Release {version}'
+      branch-template:
+        description: 'Release PR branch template'
+        required: false
+        type: string
+        default: 'release/next'
+      commit-message-template:
+        description: 'Release commit message template'
+        required: false
+        type: string
+        default: 'chore(release): {version}'
+      pr-body-template:
+        description: 'Release PR body template'
+        required: false
+        type: string
+        default: '{changelog}'
+      check-changelog:
+        description: 'Run changie-check on pull requests'
+        required: false
+        type: boolean
+        default: true
+      require-for-types:
+        description: 'Comma-separated conventional commit types that require a changelog entry'
+        required: false
+        type: string
+        default: 'feat,fix,refactor,security'
+      create-release:
+        description: 'Create GitHub Releases from created tags'
+        required: false
+        type: boolean
+        default: false
+      wait-for-publish:
+        description: 'Wait for downstream publish workflow after each pushed tag'
+        required: false
+        type: boolean
+        default: false
+      publish-workflow-name:
+        description: 'Workflow name to wait for when wait-for-publish is true'
+        required: false
+        type: string
+        default: 'Publish'
+      hex-packages:
+        description: 'Space-separated package paths for gleam-publish. workspace-file output is used when this is empty.'
+        required: false
+        type: string
+        default: ''
+      hex-replace-path-deps:
+        description: 'replace-path-deps forwarded to gleam-publish'
+        required: false
+        type: string
+        default: ''
+      hex-skip-already-published:
+        description: 'Skip Hex versions that are already published'
+        required: false
+        type: boolean
+        default: true
+      homebrew-tap-repo:
+        description: 'Homebrew tap repo in owner/repo form'
+        required: false
+        type: string
+        default: ''
+      homebrew-dist-plan:
+        description: 'cargo-dist plan JSON for publish-homebrew-formula'
+        required: false
+        type: string
+        default: ''
+      homebrew-artifact-pattern:
+        description: 'Artifact pattern forwarded to publish-homebrew-formula'
+        required: false
+        type: string
+        default: 'artifacts-*'
+      homebrew-install-linuxbrew:
+        description: 'Install Linuxbrew and run brew style --fix before committing formula files'
+        required: false
+        type: boolean
+        default: true
+    outputs:
+      version:
+        description: 'Version(s) resolved by changie-auto-tag'
+        value: ${{ jobs.tag.outputs.version }}
+      tag:
+        description: 'Tag(s) resolved by changie-auto-tag'
+        value: ${{ jobs.tag.outputs.tag }}
+      created-tags:
+        description: 'Space-separated tags created by changie-auto-tag'
+        value: ${{ jobs.tag.outputs.created-tags }}
+    secrets:
+      hex-api-key:
+        description: 'Hex.pm API key'
+        required: false
+      app-id:
+        description: 'GitHub App ID for release PR/tag token generation'
+        required: false
+      app-private-key:
+        description: 'GitHub App private key for release PR/tag token generation'
+        required: false
+      homebrew-app-id:
+        description: 'GitHub App ID for Homebrew tap publishing'
+        required: false
+      homebrew-app-private-key:
+        description: 'GitHub App private key for Homebrew tap publishing'
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      publish-hex: ${{ steps.validate.outputs.publish-hex }}
+      publish-homebrew: ${{ steps.validate.outputs.publish-homebrew }}
+      publish-targets: ${{ steps.validate.outputs.publish-targets }}
+    steps:
+      - name: Validate release workflow inputs
+        id: validate
+        shell: bash
+        env:
+          PUBLISH_TO: ${{ inputs.publish-to }}
+        run: |
+          set -euo pipefail
+
+          publish_hex=false
+          publish_homebrew=false
+          normalized=""
+
+          IFS=',' read -ra targets <<< "$PUBLISH_TO"
+          for raw_target in "${targets[@]}"; do
+            target="$(echo "$raw_target" | xargs)"
+            if [[ -z "$target" ]]; then
+              continue
+            fi
+
+            case "$target" in
+              hex)
+                publish_hex=true
+                ;;
+              homebrew)
+                publish_homebrew=true
+                ;;
+              *)
+                echo "::error::unknown publish target '$target'. Supported targets: hex, homebrew"
+                exit 1
+                ;;
+            esac
+
+            normalized="${normalized:+$normalized,}$target"
+          done
+
+          {
+            echo "publish-hex=$publish_hex"
+            echo "publish-homebrew=$publish_homebrew"
+            echo "publish-targets=$normalized"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Release workflow"
+            echo
+            if [[ -n "$normalized" ]]; then
+              echo "Validated publish targets: $normalized."
+            else
+              echo "No publish targets requested."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
