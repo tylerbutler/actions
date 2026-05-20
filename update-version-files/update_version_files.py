@@ -18,11 +18,12 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tomllib
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "_common"))
 
-from gha import fail, parse_colon_entries, update_toml_top_level_key  # noqa: E402
+from gha import append_summary, fail, parse_colon_entries, update_toml_top_level_key  # noqa: E402
 
 
 def parse_entries(text: str) -> list[tuple[str, str]]:
@@ -93,6 +94,12 @@ def main() -> None:
         if new_content != content:
             toml_path.write_text(new_content, encoding="utf-8")
         print(f'Updated {path_str}: {key} = "{version}" (from {pkg_json})')
+
+    append_summary("## Update Version Files")
+    if entries:
+        append_summary(f"Updated {len(entries)} TOML file(s) from package.json.")
+    else:
+        append_summary("No entries to update; skipped.")
 
 
 if __name__ == "__main__":

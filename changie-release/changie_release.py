@@ -23,11 +23,12 @@ import os
 import re
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "_common"))
 
-from gha import fail, parse_colon_entries, update_toml_top_level_key, write_output  # noqa: E402
+from gha import append_summary, fail, parse_colon_entries, update_toml_top_level_key, write_output  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

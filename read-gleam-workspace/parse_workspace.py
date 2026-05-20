@@ -18,6 +18,11 @@ import json
 import os
 import re
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "_common"))
+
+from gha import append_summary  # noqa: E402
 import tomllib
 from collections import deque
 
@@ -247,6 +252,13 @@ def main() -> None:
     print(f"Found {len(packages)} package(s):")
     for p in packages:
         print(f"  {p['name']}@{p['version']} ({p['path']})")
+
+    append_summary("## Read Gleam Workspace")
+    if packages:
+        names = ", ".join(p["name"] for p in packages)
+        append_summary(f"Discovered {len(packages)} package(s): {names}.")
+    else:
+        append_summary("No packages discovered in workspace.")
 
 
 if __name__ == "__main__":
