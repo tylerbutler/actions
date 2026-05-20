@@ -56,10 +56,9 @@ runs:
 
     - name: Install mise and tools
       if: inputs.install-mise == 'true'
-      uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # ratchet:jdx/mise-action@v4
+      uses: ./mise-setup
       with:
-        experimental: true
-        working_directory: ${{ inputs.working-directory }}
+        working-directory: ${{ inputs.working-directory }}
 
     - name: Download dependencies
       if: inputs.run-deps == 'true'
