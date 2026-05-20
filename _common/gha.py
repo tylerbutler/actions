@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import tomllib
 from typing import NoReturn
 
 
@@ -48,3 +49,41 @@ def append_summary(markdown: str) -> None:
         return
     with open(summary_file, "a", encoding="utf-8") as fh:
         fh.write(markdown + "\n")
+
+
+def _top_level_region_end(content: str) -> int:
+    """Return the offset of the first `[table]` header, or len(content) if none."""
+    match = re.search(r"^[ \t]*\[", content, re.MULTILINE)
+    return match.start() if match else len(content)
+
+
+def update_toml_top_level_key(content: str, key: str, new_value: str) -> str:
+    """Replace the top-level `key = "..."` string assignment in `content`.
+
+    Raises:
+        tomllib.TOMLDecodeError: if `content` is not valid TOML.
+        KeyError: if `key` is not a top-level key.
+        TypeError: if the top-level `key` is not a string value.
+        ValueError: if exactly one matching assignment line cannot be located.
+    """
+    data = tomllib.loads(content)
+    if key not in data:
+        raise KeyError(f"Top-level key {key!r} not found")
+    if not isinstance(data[key], str):
+        raise TypeError(f"Top-level key {key!r} is not a string value")
+
+    end = _top_level_region_end(content)
+    head, tail = content[:end], content[end:]
+
+    pattern = re.compile(
+        rf'^({re.escape(key)}[ \t]*=[ \t]*)"[^"\n]*"',
+        re.MULTILINE,
+    )
+    new_head, count = pattern.subn(
+        lambda m: f'{m.group(1)}"{new_value}"', head
+    )
+    if count != 1:
+        raise ValueError(
+            f"Expected exactly one top-level assignment for {key!r}, found {count}"
+        )
+    return new_head + tail

@@ -1,9 +1,10 @@
 import os
+import tomllib
 from pathlib import Path
 
 import pytest
 
-from gha import append_summary, fail, write_output
+from gha import append_summary, fail, update_toml_top_level_key, write_output
 
 
 def test_write_output_simple(tmp_path: Path, monkeypatch) -> None:
@@ -68,3 +69,43 @@ def test_append_summary_writes_with_newline(tmp_path: Path, monkeypatch) -> None
 def test_append_summary_no_env_is_noop(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
     append_summary("ignored")  # must not raise
+
+
+def test_update_toml_top_level_string_value() -> None:
+    content = 'name = "pkg"\nversion = "1.0.0"\n\n[dependencies]\nfoo = "0.1"\n'
+    out = update_toml_top_level_key(content, "version", "2.0.0")
+    assert 'version = "2.0.0"' in out
+    assert out.endswith('[dependencies]\nfoo = "0.1"\n')
+
+
+def test_update_toml_preserves_quoting_style() -> None:
+    content = 'version    =    "1.0.0"\n'
+    out = update_toml_top_level_key(content, "version", "1.1.0")
+    assert out == 'version    =    "1.1.0"\n'
+
+
+def test_update_toml_only_touches_top_level() -> None:
+    content = (
+        'version = "1.0.0"\n'
+        "\n"
+        "[dependencies]\n"
+        'other = "1.0.0"\n'
+    )
+    out = update_toml_top_level_key(content, "version", "2.0.0")
+    assert out.count('"2.0.0"') == 1
+    assert 'other = "1.0.0"' in out
+
+
+def test_update_toml_missing_key_raises() -> None:
+    with pytest.raises(KeyError):
+        update_toml_top_level_key('name = "pkg"\n', "version", "1.0.0")
+
+
+def test_update_toml_non_string_value_raises() -> None:
+    with pytest.raises(TypeError):
+        update_toml_top_level_key("version = 1\n", "version", "2")
+
+
+def test_update_toml_invalid_input_raises() -> None:
+    with pytest.raises(tomllib.TOMLDecodeError):
+        update_toml_top_level_key("not = valid = toml", "x", "y")
