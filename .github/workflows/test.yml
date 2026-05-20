@@ -38,3 +38,74 @@ jobs:
             echo "=== $script ==="
             bash "$script"
           done
+
+  smoke:
+    name: smoke (${{ matrix.action }} on ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        action: [setup-gleam, setup-go, setup-rust, setup-node]
+        os: [ubuntu-latest, macos-latest]
+        include:
+          - action: install-tools
+            os: ubuntu-latest
+          - action: run-gleam-workspace
+            os: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: setup-gleam smoke
+        if: matrix.action == 'setup-gleam'
+        uses: ./setup-gleam
+        with:
+          working-directory: tests/fixtures/setup-gleam
+          version-file: tests/fixtures/setup-gleam/.tool-versions
+          run-deps: 'false'
+      - name: setup-gleam assertion
+        if: matrix.action == 'setup-gleam'
+        run: gleam --version
+
+      - name: setup-go smoke
+        if: matrix.action == 'setup-go'
+        uses: ./setup-go
+        with:
+          working-directory: tests/fixtures/setup-go
+          run-deps: 'false'
+      - name: setup-go assertion
+        if: matrix.action == 'setup-go'
+        run: go version
+
+      - name: setup-rust smoke
+        if: matrix.action == 'setup-rust'
+        uses: ./setup-rust
+      - name: setup-rust assertion
+        if: matrix.action == 'setup-rust'
+        run: rustc --version
+
+      - name: setup-node smoke
+        if: matrix.action == 'setup-node'
+        uses: ./setup-node
+        with:
+          working-directory: tests/fixtures/setup-node
+          run-install: 'false'
+      - name: setup-node assertion
+        if: matrix.action == 'setup-node'
+        run: node --version
+
+      - name: install-tools smoke
+        if: matrix.action == 'install-tools'
+        uses: ./install-tools
+        with:
+          tools: just
+      - name: install-tools assertion
+        if: matrix.action == 'install-tools'
+        run: just --version
+
+      - name: run-gleam-workspace smoke
+        if: matrix.action == 'run-gleam-workspace'
+        uses: ./run-gleam-workspace
+        with:
+          packages: packages/demo
+          command: 'echo hello-from-$(basename "$PWD")'
+          working-directory: tests/fixtures/run-gleam-workspace
