@@ -49,7 +49,7 @@ runs:
       run: python3 "$GITHUB_ACTION_PATH/binary_size.py" cache-keys
 
     - name: Restore baseline sizes from cache
-      uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # ratchet:actions/cache/restore@v5
+      uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # ratchet:actions/cache/restore@v5
       with:
         path: /tmp/binary-size-cache
         key: ${{ steps.cache-keys.outputs.restore-prefix }}${{ github.sha }}
@@ -68,7 +68,7 @@ runs:
       run: python3 "$GITHUB_ACTION_PATH/binary_size.py" measure-and-report
 
     - name: Save current sizes to cache
-      uses: actions/cache/save@668228422ae6a00e4ad889ee87cd7109ec5666a7 # ratchet:actions/cache/save@v5
+      uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # ratchet:actions/cache/save@v5
       with:
         path: /tmp/binary-size-cache
         key: ${{ steps.cache-keys.outputs.save-key }}
