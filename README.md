@@ -239,6 +239,61 @@ Install development tools via [taiki-e/install-action](https://github.com/taiki-
 
 **Supported tools:** See [taiki-e/install-action](https://github.com/taiki-e/install-action#supported-tools)
 
+### mise-setup
+
+Install [mise](https://mise.jdx.dev/) and project-declared tools from `.mise.toml` or `.tool-versions`. Thin wrapper around `jdx/mise-action@v4`.
+
+```yaml
+- uses: tylerbutler/actions/mise-setup@main
+  with:
+    working-directory: server
+```
+
+**Inputs:**
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `working-directory` | `.` | Directory where mise should run; usually contains `.mise.toml` or `.tool-versions` for project-declared tools |
+| `experimental` | `true` | Enable mise experimental features (newer plugins) |
+| `tools` | `''` | .tool-versions-style ad-hoc tools (e.g. `node 22`). Forwarded as `tool_versions` |
+
+**Example (project-declared tools):**
+
+Declare tools in `.mise.toml` (or `.tool-versions`) before running them with `mise exec`:
+
+```toml
+[tools]
+jq = "1.7.1"
+```
+
+```yaml
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: tylerbutler/actions/mise-setup@main
+      - run: mise exec -- jq --version
+```
+
+**Example (ad-hoc tools, no `.mise.toml` needed):**
+
+```yaml
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: tylerbutler/actions/mise-setup@main
+        with:
+          tools: |
+            jq 1.7.1
+            yq 4
+      - run: mise exec -- jq --version
+```
+
+**Note on `setup-go`:** `setup-go` already integrates mise via its `install-mise: true` input — internally it calls `mise-setup`. Consumers of `setup-go` do not need to add `mise-setup` separately.
+
 ### changie-release
 
 Batch [changie](https://changie.dev/) changelog entries and create a release pull request. Useful for automating releases in projects that use changie for changelog management.

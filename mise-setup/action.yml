@@ -3,7 +3,7 @@ description: 'Install mise and project-declared tools (.mise.toml / .tool-versio
 
 inputs:
   working-directory:
-    description: 'Directory containing .mise.toml or .tool-versions'
+    description: 'Directory where mise should run; usually contains .mise.toml or .tool-versions for project-declared tools'
     required: false
     default: '.'
   experimental:
@@ -12,9 +12,9 @@ inputs:
     default: 'true'
   tools:
     description: |
-      Newline-separated ad-hoc tool versions, e.g.
-        node@22
-        jq@latest
+      .tool-versions-style ad-hoc tool versions, e.g.
+        node 22
+        jq latest
       Forwarded to jdx/mise-action as `tool_versions`. Useful when no .mise.toml exists.
     required: false
     default: ''
