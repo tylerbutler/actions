@@ -82,6 +82,7 @@ Reusable workflows live in `.github/workflows/` and are called with `uses:` from
 
 | Workflow | Purpose |
 |----------|---------|
+| `release.yml` | High-level release orchestrator: PR changie check/comment, changie release PR creation, release PR auto-tagging, and Hex/Homebrew tag publishing |
 | `auto-tag.yml` | Tags releases when release PRs merge (wraps `changie-auto-tag` action) |
 | `gleam-workspace-ci.yml` | Matrix CI for Gleam monorepos using `read-gleam-workspace` |
 
@@ -185,6 +186,7 @@ Both actions are fully backward compatible:
 - `changie-auto-tag` supports optional `create-release` input to create a GitHub Release with changie version notes. Uses `.changes/{version}.md` (or `.changes/{project}/{version}.md` for multi-project) as release notes if available, falls back to `--generate-notes`
 - In multi-project mode, `changie-release` reads `projectsVersionSeparator` from `.changie.yaml` (defaults to `-`) to correctly parse version strings like `my-package-v1.0.0`
 - In multi-project mode, the branch name template replaces `{version}` with `next` instead of the version string, since comma-separated versions aren't valid branch names
+- `release.yml` is the high-level release orchestrator. Keep `auto-tag.yml` as the lower-level primitive for consumers that only want merge-to-tag behavior. Homebrew publishing goes through the existing dist-plan based `publish-homebrew-formula` action (`homebrew-dist-plan`, `homebrew-artifact-pattern`), not a direct formula-path input.
 
 - `gleam-publish` supports `replace-path-deps` input to rewrite path dependencies to Hex version ranges before publishing. Format: `dep-name:version-toml-path` per line. Reads version from the specified TOML file and generates a `">= X.Y.Z and < (X+1).0.0"` range (or `< 0.(Y+1).0` for pre-1.0). Essential for monorepos where sub-packages use `{ path = "..." }` deps during development
 - `read-gleam-workspace` parses `workspace.toml` with `[workspace]` section containing `members` (glob-enabled) and `exclude` arrays. Uses Python `tomllib` (stdlib). Topologically sorts packages by intra-workspace dependencies so output order is safe for publishing. Outputs: `packages` (space-separated paths), `projects` (comma-separated names), `version-files` (changie format), `packages-json` (JSON), `cache-hash-globs` (for hashFiles)

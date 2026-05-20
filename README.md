@@ -896,6 +896,115 @@ jobs:
 | `tag` | Full tag(s) that were created |
 | `created-tags` | Space-separated list of tags actually created |
 
+### release
+
+High-level reusable workflow for the standard changie release lifecycle. It can:
+
+1. check PR changelog entries with `changie-check` and post a sticky preview comment,
+2. create or update a changie release PR with `changie-release`,
+3. create tags when release PRs merge with `changie-auto-tag`,
+4. publish tag releases to Hex.pm and/or a Homebrew tap.
+
+The consuming repository still owns its `on:` triggers. The same reusable workflow can be called from PR, push, and tag workflows; jobs inside `release.yml` gate themselves from the caller event context.
+
+```yaml
+jobs:
+  release:
+    uses: tylerbutler/actions/.github/workflows/release.yml@main
+```
+
+**Example (Gleam package publishing to Hex):**
+
+```yaml
+name: Release
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    branches: [main]
+  push:
+    branches: [main]
+    tags: ['v*']
+
+jobs:
+  release:
+    uses: tylerbutler/actions/.github/workflows/release.yml@main
+    with:
+      publish-to: hex
+      hex-packages: .
+    secrets:
+      hex-api-key: ${{ secrets.HEX_API_KEY }}
+      app-id: ${{ secrets.RELEASE_APP_ID }}
+      app-private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+```
+
+**Example (Hex + Homebrew with cargo-dist plan):**
+
+```yaml
+jobs:
+  dist:
+    if: startsWith(github.ref, 'refs/tags/')
+    uses: axodotdev/cargo-dist/.github/workflows/release.yml@v0.28
+
+  release:
+    needs: [dist]
+    uses: tylerbutler/actions/.github/workflows/release.yml@main
+    with:
+      publish-to: hex,homebrew
+      hex-packages: .
+      homebrew-tap-repo: owner/homebrew-tap
+      homebrew-dist-plan: ${{ needs.dist.outputs.plan }}
+    secrets:
+      hex-api-key: ${{ secrets.HEX_API_KEY }}
+      homebrew-app-id: ${{ secrets.HOMEBREW_TAP_APP_ID }}
+      homebrew-app-private-key: ${{ secrets.HOMEBREW_TAP_APP_PRIVATE_KEY }}
+```
+
+**Example (Gleam workspace / changie projects):**
+
+```yaml
+jobs:
+  release:
+    uses: tylerbutler/actions/.github/workflows/release.yml@main
+    with:
+      workspace-file: workspace.toml
+      publish-to: hex
+      hex-replace-path-deps: |
+        my-package:gleam.toml
+    secrets:
+      hex-api-key: ${{ secrets.HEX_API_KEY }}
+```
+
+**Inputs:**
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `publish-to` | `''` | Comma-separated publish targets: `hex`, `homebrew` |
+| `working-directory` | `.` | Directory containing `.changie.yaml` |
+| `changie-version` | `latest` | Changie CLI version |
+| `projects` | `''` | Comma-separated changie project keys |
+| `workspace-file` | `''` | Optional `workspace.toml`; overrides `projects` and can provide Hex package order |
+| `version-files` | `''` | Version files forwarded to `changie-release` |
+| `post-batch-command` | `''` | Command run after changie batch/version bumps |
+| `release-label` | `release` | Label required for merge-to-tag behavior |
+| `check-changelog` | `true` | Run PR changelog validation/commenting |
+| `create-release-pr` | `true` | Create/update release PRs on default-branch pushes |
+| `hex-packages` | `''` | Space-separated package paths for Hex publishing |
+| `hex-replace-path-deps` | `''` | Forwarded to `gleam-publish` |
+| `homebrew-tap-repo` | `''` | Tap repo in `owner/repo` form |
+| `homebrew-dist-plan` | `''` | cargo-dist plan JSON passed to `publish-homebrew-formula` |
+| `homebrew-artifact-pattern` | `artifacts-*` | Formula artifact pattern |
+
+**Secrets:**
+
+| Secret | Required when |
+|--------|---------------|
+| `hex-api-key` | `publish-to` contains `hex` |
+| `app-id` / `app-private-key` | Optional; use when release PR/tag pushes should trigger downstream workflows |
+| `homebrew-app-id` / `homebrew-app-private-key` | `publish-to` contains `homebrew` |
+
+auto-tag.yml remains available for consumers that only need release-PR merge to tag behavior.
+
 ### binary-size
 
 Measure binary file sizes, compare against a cached baseline from the base branch, and output a markdown report. Language-agnostic — works with any build system that produces files.

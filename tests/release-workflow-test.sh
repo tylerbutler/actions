@@ -61,3 +61,31 @@ for forbidden in ["homebrew-formula-path", "publish-to: crates", "publish-to: np
     if forbidden in text:
         raise SystemExit(f"release workflow contains forbidden stale content: {forbidden}")
 PY
+
+python3 - <<'PY'
+from pathlib import Path
+
+readme = Path("README.md").read_text()
+claude = Path("CLAUDE.md").read_text()
+
+readme_required = [
+    "### release",
+    "tylerbutler/actions/.github/workflows/release.yml@main",
+    "publish-to: hex",
+    "publish-to: hex,homebrew",
+    "homebrew-dist-plan:",
+    "workspace-file: workspace.toml",
+    "auto-tag.yml remains available",
+]
+missing = [item for item in readme_required if item not in readme]
+if missing:
+    raise SystemExit("README missing release workflow docs:\n" + "\n".join(missing))
+
+claude_required = [
+    "| `release.yml` | High-level release orchestrator",
+    "`release.yml` is the high-level release orchestrator",
+]
+missing = [item for item in claude_required if item not in claude]
+if missing:
+    raise SystemExit("CLAUDE.md missing release workflow notes:\n" + "\n".join(missing))
+PY
