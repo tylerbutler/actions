@@ -93,3 +93,11 @@ runs:
         echo "$TARGET_VERSION" > "$OUTPUT_DIR/.version"
 
         echo "✅ CCL test data $TARGET_VERSION downloaded to $OUTPUT_DIR/"
+
+        # Count downloaded JSON files for summary
+        json_count=$(find "$OUTPUT_DIR" -maxdepth 1 -name "*.json" | wc -l)
+        {
+          echo "## Download CCL Tests"
+          echo
+          echo "Downloaded CCL test data ${TARGET_VERSION} (${json_count} JSON files) to \`${OUTPUT_DIR}/\`."
+        } >> "$GITHUB_STEP_SUMMARY"

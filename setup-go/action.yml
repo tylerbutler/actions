@@ -66,3 +66,13 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: go mod download
+
+    - name: Write step summary
+      shell: bash
+      run: |
+        go_version=$(go version 2>/dev/null | head -1 || echo "unknown")
+        {
+          echo "## Setup Go Environment"
+          echo
+          echo "Set up ${go_version}."
+        } >> "$GITHUB_STEP_SUMMARY"

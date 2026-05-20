@@ -82,3 +82,13 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: bun install --frozen-lockfile
+
+    - name: Write step summary
+      shell: bash
+      run: |
+        node_version=$(node --version 2>/dev/null || echo "unknown")
+        {
+          echo "## Setup Node.js"
+          echo
+          echo "Set up Node.js ${node_version} with ${{ inputs.package-manager }}."
+        } >> "$GITHUB_STEP_SUMMARY"

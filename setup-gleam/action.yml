@@ -141,3 +141,17 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: mix deps.get
+
+    - name: Write step summary
+      shell: bash
+      run: |
+        gleam_version=$(gleam --version 2>/dev/null | head -1 || echo "unknown")
+        {
+          echo "## Setup Gleam Environment"
+          echo
+          if [[ -n "${{ steps.resolve-elixir.outputs.elixir-version }}" ]]; then
+            echo "Set up ${gleam_version} with Elixir ${{ steps.resolve-elixir.outputs.elixir-version }}."
+          else
+            echo "Set up ${gleam_version}."
+          fi
+        } >> "$GITHUB_STEP_SUMMARY"

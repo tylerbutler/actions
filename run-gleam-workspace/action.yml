@@ -35,6 +35,7 @@ runs:
           exit 1
         fi
 
+        count=0
         for path in ${PACKAGES}; do
           if [ ! -d "${path}" ]; then
             echo "::error::Package directory not found: ${path}"
@@ -47,4 +48,11 @@ runs:
             bash -c "${COMMAND}"
           )
           echo "::endgroup::"
+          count=$((count + 1))
         done
+
+        {
+          echo "## Run Gleam Workspace"
+          echo
+          echo "Ran command in ${count} package(s)."
+        } >> "$GITHUB_STEP_SUMMARY"

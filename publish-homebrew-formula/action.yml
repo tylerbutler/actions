@@ -112,6 +112,16 @@ runs:
           echo "No .rb formula artifacts found in plan — nothing to publish."
         fi
 
+        {
+          echo "## Publish Homebrew Formula"
+          echo
+          if [[ "$committed" -gt 0 ]]; then
+            echo "Pushed ${committed} formula update(s) to the tap."
+          else
+            echo "No .rb formula artifacts found; nothing to publish."
+          fi
+        } >> "$GITHUB_STEP_SUMMARY"
+
 branding:
   icon: 'package'
   color: 'orange'

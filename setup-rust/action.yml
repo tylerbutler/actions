@@ -44,3 +44,13 @@ runs:
       uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # ratchet:Swatinem/rust-cache@v2
       with:
         shared-key: rust-${{ runner.os }}-${{ inputs.toolchain }}
+
+    - name: Write step summary
+      shell: bash
+      run: |
+        rust_version=$(rustc --version 2>/dev/null || echo "unknown")
+        {
+          echo "## Setup Rust Toolchain"
+          echo
+          echo "Set up ${rust_version}."
+        } >> "$GITHUB_STEP_SUMMARY"
