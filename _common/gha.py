@@ -39,3 +39,12 @@ def fail(message: str, code: int = 1) -> NoReturn:
     """Emit a GitHub Actions error annotation and exit."""
     print(f"::error::{message}", file=sys.stderr)
     sys.exit(code)
+
+
+def append_summary(markdown: str) -> None:
+    """Append a line of Markdown to GITHUB_STEP_SUMMARY. No-op if unset."""
+    summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not summary_file:
+        return
+    with open(summary_file, "a", encoding="utf-8") as fh:
+        fh.write(markdown + "\n")

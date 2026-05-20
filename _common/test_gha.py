@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from gha import fail, write_output
+from gha import append_summary, fail, write_output
 
 
 def test_write_output_simple(tmp_path: Path, monkeypatch) -> None:
@@ -55,3 +55,16 @@ def test_fail_custom_code(capsys) -> None:
     with pytest.raises(SystemExit) as exc:
         fail("nope", code=2)
     assert exc.value.code == 2
+
+
+def test_append_summary_writes_with_newline(tmp_path: Path, monkeypatch) -> None:
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    append_summary("## Heading")
+    append_summary("body line")
+    assert summary.read_text() == "## Heading\nbody line\n"
+
+
+def test_append_summary_no_env_is_noop(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    append_summary("ignored")  # must not raise
