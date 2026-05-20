@@ -87,3 +87,24 @@ def update_toml_top_level_key(content: str, key: str, new_value: str) -> str:
             f"Expected exactly one top-level assignment for {key!r}, found {count}"
         )
     return new_head + tail
+
+
+def parse_colon_entries(text: str, fields: int) -> list[tuple[str, ...]]:
+    """Parse newline-separated, colon-delimited entries.
+
+    Blank lines and lines starting with `#` are skipped. Whitespace around
+    each field is stripped. Each non-empty line must split into exactly
+    `fields` parts.
+    """
+    out: list[tuple[str, ...]] = []
+    for lineno, raw in enumerate(text.splitlines(), start=1):
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        parts = [p.strip() for p in stripped.split(":")]
+        if len(parts) != fields:
+            raise ValueError(
+                f"line {lineno}: expected {fields} fields, got {len(parts)}: {raw!r}"
+            )
+        out.append(tuple(parts))
+    return out

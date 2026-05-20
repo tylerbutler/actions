@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from gha import append_summary, fail, update_toml_top_level_key, write_output
+from gha import append_summary, fail, parse_colon_entries, update_toml_top_level_key, write_output
 
 
 def test_write_output_simple(tmp_path: Path, monkeypatch) -> None:
@@ -109,3 +109,33 @@ def test_update_toml_non_string_value_raises() -> None:
 def test_update_toml_invalid_input_raises() -> None:
     with pytest.raises(tomllib.TOMLDecodeError):
         update_toml_top_level_key("not = valid = toml", "x", "y")
+
+
+def test_parse_colon_entries_two_fields() -> None:
+    text = "gleam.toml:version\npackages/foo/gleam.toml:version\n"
+    result = parse_colon_entries(text, fields=2)
+    assert result == [
+        ("gleam.toml", "version"),
+        ("packages/foo/gleam.toml", "version"),
+    ]
+
+
+def test_parse_colon_entries_three_fields() -> None:
+    text = "vestibule:gleam.toml:version\n"
+    result = parse_colon_entries(text, fields=3)
+    assert result == [("vestibule", "gleam.toml", "version")]
+
+
+def test_parse_colon_entries_skips_blank_and_comments() -> None:
+    text = "\n# a comment\n  \nfoo:bar\n"
+    assert parse_colon_entries(text, fields=2) == [("foo", "bar")]
+
+
+def test_parse_colon_entries_strips_whitespace() -> None:
+    text = "  foo  :  bar  \n"
+    assert parse_colon_entries(text, fields=2) == [("foo", "bar")]
+
+
+def test_parse_colon_entries_wrong_field_count_raises() -> None:
+    with pytest.raises(ValueError, match="expected 2 fields"):
+        parse_colon_entries("a:b:c\n", fields=2)
