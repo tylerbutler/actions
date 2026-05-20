@@ -1,0 +1,41 @@
+name: 'Setup mise and tools'
+description: 'Install mise and project-declared tools (.mise.toml / .tool-versions) or ad-hoc tools'
+
+inputs:
+  working-directory:
+    description: 'Directory containing .mise.toml or .tool-versions'
+    required: false
+    default: '.'
+  experimental:
+    description: 'Enable mise experimental features (newer plugins, etc.)'
+    required: false
+    default: 'true'
+  tools:
+    description: |
+      Newline-separated ad-hoc tool versions, e.g.
+        node@22
+        jq@latest
+      Forwarded to jdx/mise-action as `tool_versions`. Useful when no .mise.toml exists.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Setup mise
+      uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # ratchet:jdx/mise-action@v4
+      with:
+        experimental: ${{ inputs.experimental }}
+        working_directory: ${{ inputs.working-directory }}
+        tool_versions: ${{ inputs.tools }}
+
+    - name: Write step summary
+      working-directory: ${{ inputs.working-directory }}
+      shell: bash
+      run: |
+        installed=$(mise list --current 2>/dev/null | head -1 || echo "unknown")
+        {
+          echo "## mise-setup"
+          echo
+          echo "Installed: ${installed}"
+        } >> "$GITHUB_STEP_SUMMARY"

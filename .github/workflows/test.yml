@@ -44,7 +44,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        action: [setup-gleam, setup-go, setup-rust, setup-node]
+        action: [setup-gleam, setup-go, setup-rust, setup-node, mise-setup]
         os: [ubuntu-latest, macos-latest]
         exclude:
           # erlef/setup-beam doesn't support macos-latest (arm64) for the
@@ -110,6 +110,17 @@ jobs:
       - name: install-tools assertion
         if: matrix.action == 'install-tools'
         run: just --version
+
+      - name: mise-setup smoke
+        if: matrix.action == 'mise-setup'
+        uses: ./mise-setup
+        with:
+          working-directory: tests/fixtures/mise-setup
+      - name: mise-setup assertion
+        if: matrix.action == 'mise-setup'
+        working-directory: tests/fixtures/mise-setup
+        shell: bash
+        run: mise exec -- jq --version
 
       - name: run-gleam-workspace smoke
         if: matrix.action == 'run-gleam-workspace'
