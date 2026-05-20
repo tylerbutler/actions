@@ -60,6 +60,19 @@ runs:
       with:
         tool: ${{ inputs.tools }}
 
+    - name: Resolve Elixir version
+      id: resolve-elixir
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        ELIXIR_VERSION_INPUT: ${{ inputs.elixir-version }}
+      run: |
+        version=$("$GITHUB_ACTION_PATH/resolve_elixir_version.sh")
+        echo "elixir-version=$version" >> "$GITHUB_OUTPUT"
+        if [[ -n "$version" && -z "$ELIXIR_VERSION_INPUT" ]]; then
+          echo "Auto-detected Elixir requirement (mix.exs found): $version"
+        fi
+
     - name: Setup BEAM (from version file)
       if: inputs.version-file != '' && inputs.erlang-version == ''
       uses: erlef/setup-beam@e6d7c94229049569db56a7ad5a540c051a010af9 # ratchet:erlef/setup-beam@v1
@@ -68,19 +81,19 @@ runs:
         version-type: ${{ inputs.version-type }}
 
     - name: Setup BEAM (explicit versions, Gleam only)
-      if: inputs.erlang-version != '' && inputs.elixir-version == ''
+      if: inputs.erlang-version != '' && steps.resolve-elixir.outputs.elixir-version == ''
       uses: erlef/setup-beam@e6d7c94229049569db56a7ad5a540c051a010af9 # ratchet:erlef/setup-beam@v1
       with:
         otp-version: ${{ inputs.erlang-version }}
         gleam-version: ${{ inputs.gleam-version }}
 
     - name: Setup BEAM (explicit versions, Gleam + Elixir)
-      if: inputs.erlang-version != '' && inputs.elixir-version != ''
+      if: inputs.erlang-version != '' && steps.resolve-elixir.outputs.elixir-version != ''
       uses: erlef/setup-beam@e6d7c94229049569db56a7ad5a540c051a010af9 # ratchet:erlef/setup-beam@v1
       with:
         otp-version: ${{ inputs.erlang-version }}
         gleam-version: ${{ inputs.gleam-version }}
-        elixir-version: ${{ inputs.elixir-version }}
+        elixir-version: ${{ steps.resolve-elixir.outputs.elixir-version }}
         rebar3-version: ${{ inputs.rebar-version }}
 
     - name: Setup Node.js
@@ -101,15 +114,15 @@ runs:
           gleam-${{ runner.os }}-
 
     - name: Cache Mix dependencies
-      if: inputs.cache == 'true' && inputs.elixir-version != ''
+      if: inputs.cache == 'true' && steps.resolve-elixir.outputs.elixir-version != ''
       uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # ratchet:actions/cache@v5
       with:
         path: |
           ${{ inputs.working-directory }}/deps
           ${{ inputs.working-directory }}/_build
-        key: mix-${{ runner.os }}-${{ inputs.elixir-version }}-${{ hashFiles(format('{0}/mix.lock', inputs.working-directory)) }}
+        key: mix-${{ runner.os }}-${{ steps.resolve-elixir.outputs.elixir-version }}-${{ hashFiles(format('{0}/mix.lock', inputs.working-directory)) }}
         restore-keys: |
-          mix-${{ runner.os }}-${{ inputs.elixir-version }}-
+          mix-${{ runner.os }}-${{ steps.resolve-elixir.outputs.elixir-version }}-
 
     - name: Download dependencies (just)
       if: inputs.run-deps == 'true' && hashFiles(format('{0}/justfile', inputs.working-directory)) != ''
@@ -124,7 +137,7 @@ runs:
       run: gleam deps download
 
     - name: Install Mix dependencies
-      if: inputs.run-deps == 'true' && inputs.elixir-version != '' && hashFiles(format('{0}/justfile', inputs.working-directory)) == ''
+      if: inputs.run-deps == 'true' && steps.resolve-elixir.outputs.elixir-version != '' && hashFiles(format('{0}/justfile', inputs.working-directory)) == ''
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: mix deps.get

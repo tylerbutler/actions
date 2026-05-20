@@ -20,7 +20,7 @@ Setup Gleam/BEAM environment with caching, optional Elixir, and optional JavaScr
 |-------|---------|-------------|
 | `erlang-version` | `''` | Erlang/OTP version (ignored if version-file set) |
 | `gleam-version` | `''` | Gleam version (ignored if version-file set) |
-| `elixir-version` | `''` | Elixir version (enables Mix support) |
+| `elixir-version` | `''` | Elixir version (enables Mix support). Auto-detected from `mix.exs` when unset — see below. |
 | `rebar-version` | `''` | Rebar3 version (used with Elixir) |
 | `version-file` | `.tool-versions` | Path to version file |
 | `version-type` | `strict` | Version matching: strict or loose |
@@ -30,6 +30,8 @@ Setup Gleam/BEAM environment with caching, optional Elixir, and optional JavaScr
 | `working-directory` | `.` | Working directory |
 | `tools` | `just` | Tools to install via taiki-e/install-action (comma-separated) |
 | `run-deps` | `true` | Run dependency download |
+
+**Mix auto-detection:** if `mix.exs` is present in `working-directory` and `elixir-version` is unset, Elixir is installed automatically — the version comes from `.tool-versions` if it declares `elixir`, otherwise falls back to `1.17`.
 
 **Example (Gleam only):**
 
