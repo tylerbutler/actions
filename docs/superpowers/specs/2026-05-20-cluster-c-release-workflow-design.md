@@ -53,7 +53,7 @@ jobs:
         my-pkg-plugin:packages/plugin/gleam.toml:version
       hex-packages: . packages/plugin
       homebrew-tap-repo: owner/homebrew-tap
-      homebrew-formula-path: Formula/my-pkg.rb
+      homebrew-dist-plan: ${{ needs.dist.outputs.plan }}
     secrets:
       hex-api-key: ${{ secrets.HEX_API_KEY }}
       app-id: ${{ secrets.RELEASE_APP_ID }}
@@ -89,7 +89,9 @@ jobs:
 | `hex-replace-path-deps` | `''` | Forwarded to `gleam-publish`. |
 | `hex-skip-already-published` | `true` | Forwarded to `gleam-publish`. |
 | `homebrew-tap-repo` | `''` | Required when `publish-to` contains `homebrew`. |
-| `homebrew-formula-path` | `''` | Required when `publish-to` contains `homebrew`. |
+| `homebrew-dist-plan` | `''` | dist plan JSON. Required when `publish-to` contains `homebrew`. |
+| `homebrew-artifact-pattern` | `'artifacts-*'` | Forwarded to `publish-homebrew-formula`. |
+| `homebrew-install-linuxbrew` | `true` | Forwarded to `publish-homebrew-formula`. |
 
 ### Secrets
 
@@ -113,7 +115,7 @@ Validation is strict:
 
 - `publish-to: crates` or `publish-to: npm` fails until those adapters exist.
 - `hex` without `hex-api-key` fails on tag publish.
-- `homebrew` without tap inputs or Homebrew app secrets fails on tag publish.
+- `homebrew` without tap inputs, dist plan JSON, or Homebrew app secrets fails on tag publish.
 - Empty `publish-to` is valid and skips publishing.
 
 ### 2. PR changelog check
@@ -155,8 +157,9 @@ Hex publishing:
 
 Homebrew publishing:
 
-1. Generate a GitHub App installation token scoped to `homebrew-tap-repo`.
-2. Call `publish-homebrew-formula` with `tap-repo`, `formula-path`, and the generated token.
+1. Receive the dist plan JSON through `homebrew-dist-plan`.
+2. Call `publish-homebrew-formula` with `app-id`, `private-key`, `tap-repo`, `plan`, `artifact-pattern`, and `install-linuxbrew`.
+3. Let `publish-homebrew-formula` mint the tap-scoped GitHub App token, download matching formula artifacts, style them when configured, and push commits to the tap.
 
 Hex and Homebrew jobs can run independently. One failing target fails the workflow; no target is silently skipped when explicitly requested.
 
@@ -230,7 +233,7 @@ Also update `CLAUDE.md` / repo memory docs if needed so future work knows `relea
 
 1. **Reusable workflows cannot own caller triggers.** Mitigation: document caller workflows clearly and keep event gating inside `release.yml` defensive.
 2. **One workflow may look broad.** Mitigation: keep jobs phase-oriented and delegate actual work to existing actions.
-3. **Homebrew publishing depends on a consumer shim pattern.** Mitigation: `publish-homebrew-formula` already documents the dist shim use case; this workflow calls the action directly for the post-tag publish phase.
+3. **Homebrew publishing depends on dist plan/artifact plumbing.** Mitigation: expose the existing `publish-homebrew-formula` contract directly (`plan`, `artifact-pattern`, `install-linuxbrew`) instead of inventing a parallel formula-path adapter.
 4. **Future publish targets could bloat the interface.** Mitigation: reject unknown targets now and add adapters one at a time with explicit inputs.
 
 ## Out-of-scope follow-ups
