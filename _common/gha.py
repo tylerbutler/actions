@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+from typing import NoReturn
 
 
 def write_output(key: str, value: str) -> None:
@@ -32,3 +33,9 @@ def write_output(key: str, value: str) -> None:
             fh.write(block)
     else:
         sys.stdout.write(block)
+
+
+def fail(message: str, code: int = 1) -> NoReturn:
+    """Emit a GitHub Actions error annotation and exit."""
+    print(f"::error::{message}", file=sys.stderr)
+    sys.exit(code)

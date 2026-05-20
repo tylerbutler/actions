@@ -1,7 +1,9 @@
 import os
 from pathlib import Path
 
-from gha import write_output
+import pytest
+
+from gha import fail, write_output
 
 
 def test_write_output_simple(tmp_path: Path, monkeypatch) -> None:
@@ -40,3 +42,16 @@ def test_write_output_key_sanitised_for_sentinel(tmp_path: Path, monkeypatch) ->
     monkeypatch.setenv("GITHUB_OUTPUT", str(out))
     write_output("pr-url", "a\nb")
     assert "pr-url<<EOF_PR_URL\n" in out.read_text()
+
+
+def test_fail_exits_one_by_default(capsys) -> None:
+    with pytest.raises(SystemExit) as exc:
+        fail("kaboom")
+    assert exc.value.code == 1
+    assert "::error::kaboom" in capsys.readouterr().err
+
+
+def test_fail_custom_code(capsys) -> None:
+    with pytest.raises(SystemExit) as exc:
+        fail("nope", code=2)
+    assert exc.value.code == 2
