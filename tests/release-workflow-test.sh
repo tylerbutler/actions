@@ -10,6 +10,7 @@ fi
 
 python3 - <<'PY'
 from pathlib import Path
+import re
 
 text = Path(".github/workflows/release.yml").read_text()
 
@@ -33,29 +34,46 @@ required = [
     "homebrew)",
     "check-changelog:",
     "create-release-pr:",
-    "tylerbutler/actions/changie-check@434af6fb683e908d5a2fab1b53849c2d54a86566",
-    "marocchino/sticky-pull-request-comment@v2",
+    "marocchino/sticky-pull-request-comment",
     "header: changie-check",
     "steps.check.outputs.needs-entry == 'true'",
-    "tylerbutler/actions/changie-release@434af6fb683e908d5a2fab1b53849c2d54a86566",
     "post-batch-command: ${{ inputs.post-batch-command }}",
     "tag:",
     "contains(github.event.pull_request.labels.*.name, inputs.release-label)",
-    "tylerbutler/actions/changie-auto-tag@434af6fb683e908d5a2fab1b53849c2d54a86566",
     "publish-hex:",
     "HEX_API_KEY: ${{ secrets.hex-api-key }}",
-    "tylerbutler/actions/gleam-publish@434af6fb683e908d5a2fab1b53849c2d54a86566",
     "packages: ${{ steps.packages.outputs.packages }}",
     "publish-homebrew:",
     "APP_ID: ${{ secrets.homebrew-app-id }}",
     "PLAN: ${{ inputs.homebrew-dist-plan }}",
-    "tylerbutler/actions/publish-homebrew-formula@434af6fb683e908d5a2fab1b53849c2d54a86566",
     "plan: ${{ inputs.homebrew-dist-plan }}",
 ]
 
 missing = [item for item in required if item not in text]
 if missing:
     raise SystemExit("release workflow missing expected content:\n" + "\n".join(missing))
+
+self_actions = [
+    "changie-check",
+    "changie-release",
+    "changie-auto-tag",
+    "gleam-publish",
+    "publish-homebrew-formula",
+]
+missing_pinned_actions = []
+for action in self_actions:
+    pattern = re.compile(
+        rf"uses:\s+tylerbutler/actions/{re.escape(action)}@[0-9a-f]{{40}}\s+"
+        rf"#\s+ratchet:tylerbutler/actions/{re.escape(action)}@main"
+    )
+    if not pattern.search(text):
+        missing_pinned_actions.append(f"tylerbutler/actions/{action}@<40-char-sha> # ratchet:...@main")
+
+if missing_pinned_actions:
+    raise SystemExit(
+        "release workflow missing pinned self-action references:\n"
+        + "\n".join(missing_pinned_actions)
+    )
 
 for forbidden in ["homebrew-formula-path", "publish-to: crates", "publish-to: npm"]:
     if forbidden in text:
