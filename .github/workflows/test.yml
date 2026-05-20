@@ -46,6 +46,13 @@ jobs:
       matrix:
         action: [setup-gleam, setup-go, setup-rust, setup-node]
         os: [ubuntu-latest, macos-latest]
+        exclude:
+          # erlef/setup-beam doesn't support macos-latest (arm64) for the
+          # Erlang/Gleam versions in our fixture — spawn ENOEXEC trying to
+          # exec x86_64 binaries on Apple Silicon. Track upstream support
+          # and re-enable when fixed.
+          - action: setup-gleam
+            os: macos-latest
         include:
           - action: install-tools
             os: ubuntu-latest
