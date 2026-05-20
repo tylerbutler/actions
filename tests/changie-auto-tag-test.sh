@@ -47,7 +47,7 @@ CHANGIE
 
   git init --bare "$tmp/origin.git" >/dev/null
 
-  git -C "$tmp/seed" init >/dev/null
+  git -C "$tmp/seed" init -b main >/dev/null
   git -C "$tmp/seed" config user.email test@example.com
   git -C "$tmp/seed" config user.name "Test User"
   git -C "$tmp/seed" commit --allow-empty -m "seed" >/dev/null
@@ -55,7 +55,7 @@ CHANGIE
   git -C "$tmp/seed" remote add origin "$tmp/origin.git"
   git -C "$tmp/seed" push origin main core-v1.0.0 >/dev/null
 
-  git -C "$tmp/work" init >/dev/null
+  git -C "$tmp/work" init -b main >/dev/null
   git -C "$tmp/work" config user.email test@example.com
   git -C "$tmp/work" config user.name "Test User"
   git -C "$tmp/work" commit --allow-empty -m "release" >/dev/null
@@ -131,7 +131,7 @@ GH
 
   git init --bare "$tmp/origin.git" >/dev/null
 
-  git -C "$tmp/work" init >/dev/null
+  git -C "$tmp/work" init -b main >/dev/null
   git -C "$tmp/work" config user.email test@example.com
   git -C "$tmp/work" config user.name "Test User"
   git -C "$tmp/work" commit --allow-empty -m "release" >/dev/null
@@ -218,7 +218,7 @@ GH
 
   git init --bare "$tmp/origin.git" >/dev/null
 
-  git -C "$tmp/work" init >/dev/null
+  git -C "$tmp/work" init -b main >/dev/null
   git -C "$tmp/work" config user.email test@example.com
   git -C "$tmp/work" config user.name "Test User"
   git -C "$tmp/work" commit --allow-empty -m "release" >/dev/null
@@ -308,7 +308,7 @@ GH
 
   git init --bare "$tmp/origin.git" >/dev/null
 
-  git -C "$tmp/work" init >/dev/null
+  git -C "$tmp/work" init -b main >/dev/null
   git -C "$tmp/work" config user.email test@example.com
   git -C "$tmp/work" config user.name "Test User"
   git -C "$tmp/work" commit --allow-empty -m "release" >/dev/null
@@ -381,7 +381,7 @@ GH
 
   git init --bare "$tmp/origin.git" >/dev/null
 
-  git -C "$tmp/work" init >/dev/null
+  git -C "$tmp/work" init -b main >/dev/null
   git -C "$tmp/work" config user.email test@example.com
   git -C "$tmp/work" config user.name "Test User"
   git -C "$tmp/work" commit --allow-empty -m "release" >/dev/null
@@ -442,7 +442,7 @@ GH
 
   git init --bare "$tmp/origin.git" >/dev/null
 
-  git -C "$tmp/seed" init >/dev/null
+  git -C "$tmp/seed" init -b main >/dev/null
   git -C "$tmp/seed" config user.email test@example.com
   git -C "$tmp/seed" config user.name "Test User"
   git -C "$tmp/seed" commit --allow-empty -m "seed" >/dev/null
@@ -450,7 +450,7 @@ GH
   git -C "$tmp/seed" remote add origin "$tmp/origin.git"
   git -C "$tmp/seed" push origin main v1.0.0 >/dev/null
 
-  git -C "$tmp/work" init >/dev/null
+  git -C "$tmp/work" init -b main >/dev/null
   git -C "$tmp/work" config user.email test@example.com
   git -C "$tmp/work" config user.name "Test User"
   git -C "$tmp/work" commit --allow-empty -m "release" >/dev/null
