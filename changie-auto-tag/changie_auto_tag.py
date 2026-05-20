@@ -20,7 +20,11 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Callable, NoReturn
+from typing import Callable
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "_common"))
+
+from gha import fail, write_output  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -220,21 +224,6 @@ def _gh_release_create(
 # ---------------------------------------------------------------------------
 
 
-def _write_output(key: str, value: str) -> None:
-    out_file = os.environ.get("GITHUB_OUTPUT")
-    block = f"{key}={value}\n"
-    if out_file:
-        with open(out_file, "a", encoding="utf-8") as f:
-            f.write(block)
-    else:
-        sys.stdout.write(block)
-
-
-def _fail(message: str) -> NoReturn:
-    print(f"::error::{message}", file=sys.stderr)
-    sys.exit(1)
-
-
 def _split_csv(text: str) -> list[str]:
     return [p.strip() for p in text.split(",") if p.strip()]
 
@@ -257,8 +246,8 @@ def cmd_read_config() -> None:
         return
     cwd = Path(os.environ.get("WORKING_DIRECTORY", "."))
     config = _load_changie_config(cwd)
-    _write_output("changes-dir", config["changesDir"])
-    _write_output("separator", config["projectsVersionSeparator"])
+    write_output("changes-dir", config["changesDir"])
+    write_output("separator", config["projectsVersionSeparator"])
 
 
 def _wait(tag: str) -> None:
@@ -277,7 +266,7 @@ def _wait(tag: str) -> None:
         get_run=_gh_get_run,
     )
     if not ok:
-        _fail(msg)
+        fail(msg)
 
 
 def cmd_tag() -> None:
@@ -308,7 +297,7 @@ def cmd_tag() -> None:
                     print(f"Tag {tag} already exists on origin, skipping")
                     continue
             except RuntimeError as e:
-                _fail(str(e))
+                fail(str(e))
 
             _git_create_tag(tag, cwd)
             created.append(tag)
@@ -321,32 +310,32 @@ def cmd_tag() -> None:
         else:
             print("No new tags to push")
 
-        _write_output("version", ", ".join(all_versions))
-        _write_output("tag", ", ".join(all_tags))
-        _write_output("created-tags", " ".join(created))
+        write_output("version", ", ".join(all_versions))
+        write_output("tag", ", ".join(all_tags))
+        write_output("created-tags", " ".join(created))
         return
 
     # Single-project mode
     version = _changie_latest(None, cwd)
     tag = f"{prefix}{version}"
-    _write_output("version", version)
-    _write_output("tag", tag)
+    write_output("version", version)
+    write_output("tag", tag)
 
     if _git_tag_exists_local(tag, cwd):
         print(f"Tag {tag} already exists, skipping")
-        _write_output("created-tags", "")
+        write_output("created-tags", "")
         return
     try:
         if _git_tag_exists_remote(tag, cwd):
             print(f"Tag {tag} already exists on origin, skipping")
-            _write_output("created-tags", "")
+            write_output("created-tags", "")
             return
     except RuntimeError as e:
-        _fail(str(e))
+        fail(str(e))
 
     _git_create_tag(tag, cwd)
     _git_push_tag(tag, cwd)
-    _write_output("created-tags", tag)
+    write_output("created-tags", tag)
     _wait(tag)
 
 
