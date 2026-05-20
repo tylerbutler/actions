@@ -20,7 +20,10 @@ import subprocess
 import sys
 import tomllib
 from pathlib import Path
-from typing import NoReturn
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "_common"))
+
+from gha import append_summary, fail, write_output  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -108,28 +111,6 @@ def _is_safe_pkg_path(p: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _write_output(key: str, value: str) -> None:
-    out_file = os.environ.get("GITHUB_OUTPUT")
-    block = f"{key}={value}\n"
-    if out_file:
-        with open(out_file, "a", encoding="utf-8") as f:
-            f.write(block)
-    else:
-        sys.stdout.write(block)
-
-
-def _append_summary(line: str) -> None:
-    summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
-    if summary_file:
-        with open(summary_file, "a", encoding="utf-8") as f:
-            f.write(line + "\n")
-
-
-def _fail(message: str) -> NoReturn:
-    print(f"::error::{message}", file=sys.stderr)
-    sys.exit(1)
-
-
 # ---------------------------------------------------------------------------
 # Subcommands
 # ---------------------------------------------------------------------------
@@ -145,28 +126,28 @@ def cmd_rewrite_path_deps() -> None:
     try:
         entries = parse_replace_path_deps(replace_text)
     except ValueError as e:
-        _fail(str(e))
+        fail(str(e))
 
     pkg_dirs = [p for p in packages_text.split() if p]
 
     # Validate package paths up-front
     for p in pkg_dirs:
         if not _is_safe_pkg_path(p):
-            _fail(f"Invalid package path: {p}")
+            fail(f"Invalid package path: {p}")
 
     for dep_name, version_toml_rel in entries:
         version_toml = cwd / version_toml_rel
         if not version_toml.is_file():
-            _fail(f"Version source file not found: {version_toml}")
+            fail(f"Version source file not found: {version_toml}")
         try:
             _, dep_version = read_gleam_meta(version_toml.read_text(encoding="utf-8"))
         except (KeyError, tomllib.TOMLDecodeError) as e:
-            _fail(f"Failed to read {version_toml}: {e}")
+            fail(f"Failed to read {version_toml}: {e}")
 
         try:
             rng = hex_range(dep_version)
         except ValueError as e:
-            _fail(f"Cannot compute Hex range for {dep_name}@{dep_version}: {e}")
+            fail(f"Cannot compute Hex range for {dep_name}@{dep_version}: {e}")
 
         print(f'Dependency {dep_name}: version {dep_version} → "{rng}"')
 
@@ -245,19 +226,19 @@ def cmd_publish() -> None:
             failed.append(pkg_dir_str)
         print("::endgroup::")
 
-    _write_output("published", " ".join(published))
-    _write_output("skipped", " ".join(skipped))
+    write_output("published", " ".join(published))
+    write_output("skipped", " ".join(skipped))
 
-    _append_summary("### Publish Results")
+    append_summary("### Publish Results")
     if published:
-        _append_summary(f"- **Published:** {' '.join(published)}")
+        append_summary(f"- **Published:** {' '.join(published)}")
     if skipped:
-        _append_summary(f"- **Skipped:** {' '.join(skipped)}")
+        append_summary(f"- **Skipped:** {' '.join(skipped)}")
     if failed:
-        _append_summary(f"- **Failed:** {' '.join(failed)}")
+        append_summary(f"- **Failed:** {' '.join(failed)}")
 
     if failed:
-        _fail(f"Some packages failed to publish: {' '.join(failed)}")
+        fail(f"Some packages failed to publish: {' '.join(failed)}")
 
 
 # ---------------------------------------------------------------------------
