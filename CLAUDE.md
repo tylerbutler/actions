@@ -212,3 +212,11 @@ exclude = ["packages/my_lib_experimental"]
 ## Versioning
 
 This repo has no release process. Consumers pin to `@main`. There are no version tags.
+
+## Internal conventions
+
+- **Shared Python helpers** live in `_common/gha.py`. Action scripts inject `$GITHUB_ACTION_PATH/../_common` into `sys.path` and import from `gha` (`write_output`, `fail`, `append_summary`, `update_toml_top_level_key`, `parse_colon_entries`). Do not copy these helpers back into individual actions; add new ones to `_common/gha.py` with paired tests in `_common/test_gha.py`.
+
+- **Step summaries** follow the shape documented in `README.md`. Use `gha.append_summary()` from Python helpers; use `>> "$GITHUB_STEP_SUMMARY"` from inline bash.
+
+- **CI** runs on every PR (`.github/workflows/test.yml`): pytest across all Python helpers, the `tests/*-test.sh` integration scripts, and smoke tests that exercise the `setup-*` composite actions against fixtures under `tests/fixtures/`.

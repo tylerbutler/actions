@@ -2,6 +2,20 @@
 
 Reusable composite actions for CI/CD workflows across repositories.
 
+## Step summaries
+
+Every action in this repo contributes a section to `$GITHUB_STEP_SUMMARY` using a consistent shape:
+
+```markdown
+## <Action Name>
+
+<one-sentence outcome>
+
+<optional Markdown body: tables for tabular data, bullet lists otherwise>
+```
+
+Skipped or no-op runs still emit a section so the summary is a faithful record of what ran. Python-backed actions use `_common/gha.append_summary`; inline-bash actions append directly to `$GITHUB_STEP_SUMMARY`.
+
 ## Available Actions
 
 ### setup-gleam
