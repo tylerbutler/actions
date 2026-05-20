@@ -376,3 +376,170 @@ jobs:
               echo "Created or updated release PR #${PR_NUMBER} for ${VERSION}."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+  tag:
+    needs: validate
+    if: github.event_name == 'pull_request' && github.event.pull_request.merged && contains(github.event.pull_request.labels.*.name, inputs.release-label)
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.auto-tag.outputs.version }}
+      tag: ${{ steps.auto-tag.outputs.tag }}
+      created-tags: ${{ steps.auto-tag.outputs.created-tags }}
+    env:
+      HAS_APP_SECRETS: ${{ secrets.app-id != '' && secrets.app-private-key != '' }}
+    steps:
+      - name: Generate app token
+        if: env.HAS_APP_SECRETS == 'true'
+        id: app-token
+        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # ratchet:actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.app-id }}
+          private-key: ${{ secrets.app-private-key }}
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # ratchet:actions/checkout@v4
+        with:
+          token: ${{ steps.app-token.outputs.token || github.token }}
+
+      - name: Read workspace
+        if: inputs.workspace-file != ''
+        id: workspace
+        uses: tylerbutler/actions/read-gleam-workspace@434af6fb683e908d5a2fab1b53849c2d54a86566 # ratchet:tylerbutler/actions/read-gleam-workspace@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          workspace-file: ${{ inputs.workspace-file }}
+
+      - name: Auto-tag release
+        id: auto-tag
+        uses: tylerbutler/actions/changie-auto-tag@434af6fb683e908d5a2fab1b53849c2d54a86566 # ratchet:tylerbutler/actions/changie-auto-tag@main
+        with:
+          changie-version: ${{ inputs.changie-version }}
+          working-directory: ${{ inputs.working-directory }}
+          projects: ${{ steps.workspace.outputs.projects || inputs.projects }}
+          create-release: ${{ inputs.create-release }}
+          wait-for-publish: ${{ inputs.wait-for-publish }}
+          publish-workflow-name: ${{ inputs.publish-workflow-name }}
+          token: ${{ steps.app-token.outputs.token || github.token }}
+
+      - name: Summarize tags
+        shell: bash
+        env:
+          CREATED_TAGS: ${{ steps.auto-tag.outputs.created-tags }}
+        run: |
+          {
+            echo "## Release workflow"
+            echo
+            if [[ -n "$CREATED_TAGS" ]]; then
+              echo "Created tags: $CREATED_TAGS."
+            else
+              echo "No new tags created."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish-hex:
+    needs: validate
+    if: startsWith(github.ref, 'refs/tags/') && needs.validate.outputs.publish-hex == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate Hex inputs
+        shell: bash
+        env:
+          HEX_API_KEY: ${{ secrets.hex-api-key }}
+        run: |
+          if [[ -n "$HEX_API_KEY" ]]; then
+            exit 0
+          fi
+          echo "::error::publish-to includes 'hex', but secret hex-api-key is missing"
+          exit 1
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # ratchet:actions/checkout@v4
+
+      - name: Read workspace
+        if: inputs.workspace-file != ''
+        id: workspace
+        uses: tylerbutler/actions/read-gleam-workspace@434af6fb683e908d5a2fab1b53849c2d54a86566 # ratchet:tylerbutler/actions/read-gleam-workspace@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          workspace-file: ${{ inputs.workspace-file }}
+          tag: ${{ github.ref_name }}
+
+      - name: Resolve Hex packages
+        id: packages
+        shell: bash
+        env:
+          WORKSPACE_PACKAGES: ${{ steps.workspace.outputs.packages }}
+          INPUT_PACKAGES: ${{ inputs.hex-packages }}
+        run: |
+          set -euo pipefail
+          packages="${WORKSPACE_PACKAGES:-$INPUT_PACKAGES}"
+          if [[ -z "$packages" ]]; then
+            echo "::error::publish-to includes 'hex', but no packages were resolved. Set workspace-file or hex-packages."
+            exit 1
+          fi
+          echo "packages=$packages" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to Hex
+        id: publish
+        uses: tylerbutler/actions/gleam-publish@434af6fb683e908d5a2fab1b53849c2d54a86566 # ratchet:tylerbutler/actions/gleam-publish@main
+        with:
+          packages: ${{ steps.packages.outputs.packages }}
+          working-directory: ${{ inputs.working-directory }}
+          hex-api-key: ${{ secrets.hex-api-key }}
+          skip-already-published: ${{ inputs.hex-skip-already-published }}
+          replace-path-deps: ${{ inputs.hex-replace-path-deps }}
+
+      - name: Summarize Hex publish
+        shell: bash
+        env:
+          PUBLISHED: ${{ steps.publish.outputs.published }}
+          SKIPPED: ${{ steps.publish.outputs.skipped }}
+        run: |
+          {
+            echo "## Release workflow"
+            echo
+            echo "Published Hex packages: ${PUBLISHED:-none}; skipped: ${SKIPPED:-none}."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish-homebrew:
+    needs: validate
+    if: startsWith(github.ref, 'refs/tags/') && needs.validate.outputs.publish-homebrew == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate Homebrew inputs
+        shell: bash
+        env:
+          APP_ID: ${{ secrets.homebrew-app-id }}
+          PRIVATE_KEY: ${{ secrets.homebrew-app-private-key }}
+          TAP_REPO: ${{ inputs.homebrew-tap-repo }}
+          PLAN: ${{ inputs.homebrew-dist-plan }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [[ -n "$APP_ID" ]] || missing+=("secret homebrew-app-id")
+          [[ -n "$PRIVATE_KEY" ]] || missing+=("secret homebrew-app-private-key")
+          [[ -n "$TAP_REPO" ]] || missing+=("input homebrew-tap-repo")
+          [[ -n "$PLAN" ]] || missing+=("input homebrew-dist-plan")
+          if [[ "${#missing[@]}" -gt 0 ]]; then
+            printf '::error::publish-to includes homebrew, but these values are missing: %s\n' "${missing[*]}"
+            exit 1
+          fi
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # ratchet:actions/checkout@v4
+
+      - name: Publish Homebrew formula
+        uses: tylerbutler/actions/publish-homebrew-formula@434af6fb683e908d5a2fab1b53849c2d54a86566 # ratchet:tylerbutler/actions/publish-homebrew-formula@main
+        with:
+          app-id: ${{ secrets.homebrew-app-id }}
+          private-key: ${{ secrets.homebrew-app-private-key }}
+          tap-repo: ${{ inputs.homebrew-tap-repo }}
+          plan: ${{ inputs.homebrew-dist-plan }}
+          artifact-pattern: ${{ inputs.homebrew-artifact-pattern }}
+          install-linuxbrew: ${{ inputs.homebrew-install-linuxbrew }}
+
+      - name: Summarize Homebrew publish
+        shell: bash
+        run: |
+          {
+            echo "## Release workflow"
+            echo
+            echo "Published Homebrew formula artifacts to ${{ inputs.homebrew-tap-repo }}."
+          } >> "$GITHUB_STEP_SUMMARY"

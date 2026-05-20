@@ -39,6 +39,18 @@ required = [
     "steps.check.outputs.needs-entry == 'true'",
     "tylerbutler/actions/changie-release@434af6fb683e908d5a2fab1b53849c2d54a86566",
     "post-batch-command: ${{ inputs.post-batch-command }}",
+    "tag:",
+    "contains(github.event.pull_request.labels.*.name, inputs.release-label)",
+    "tylerbutler/actions/changie-auto-tag@434af6fb683e908d5a2fab1b53849c2d54a86566",
+    "publish-hex:",
+    "HEX_API_KEY: ${{ secrets.hex-api-key }}",
+    "tylerbutler/actions/gleam-publish@434af6fb683e908d5a2fab1b53849c2d54a86566",
+    "packages: ${{ steps.packages.outputs.packages }}",
+    "publish-homebrew:",
+    "APP_ID: ${{ secrets.homebrew-app-id }}",
+    "PLAN: ${{ inputs.homebrew-dist-plan }}",
+    "tylerbutler/actions/publish-homebrew-formula@434af6fb683e908d5a2fab1b53849c2d54a86566",
+    "plan: ${{ inputs.homebrew-dist-plan }}",
 ]
 
 missing = [item for item in required if item not in text]
