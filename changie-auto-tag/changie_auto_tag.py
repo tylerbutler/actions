@@ -112,15 +112,15 @@ def wait_for_publish(
         try:
             run = get_run(run_id)
         except Exception as e:
-            return False, f"Failed to read run {run_id} for {tag}: {e}"
+            return False, f"Failed to read publish workflow run {run_id} for tag {tag}: {e}"
         status = run.get("status") or ""
         conclusion = run.get("conclusion") or ""
         if status == "completed":
             if conclusion == "success":
-                msg = f"Run {run_id} for tag {tag} completed successfully"
+                msg = f"Publish workflow run {run_id} for tag {tag} completed successfully"
                 print(msg)
                 return True, msg
-            return False, f"Run {run_id} for tag {tag} completed with conclusion {conclusion}"
+            return False, f"Publish workflow run {run_id} for tag {tag} completed with conclusion {conclusion}"
         if now() - start >= timeout:
             return False, f"Timed out waiting for run {run_id} for tag {tag}"
         sleep(poll)

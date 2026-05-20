@@ -6,23 +6,15 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 extract_create_tags_script() {
-  awk '
-    /- name: Get version and create tags/ { in_step = 1; next }
-    in_step && /run: \|/ { in_run = 1; next }
-    in_run && /^$/ { print ""; next }
-    in_run && /^        / { sub(/^        /, ""); print; next }
-    in_run && !/^        / { exit }
-  ' "$repo_root/changie-auto-tag/action.yml"
+  # The action.yml step delegates to changie_auto_tag.py tag; emit the
+  # same invocation so the test exercises the real production code path.
+  printf 'python3 %q tag\n' "$repo_root/changie-auto-tag/changie_auto_tag.py"
 }
 
 extract_create_releases_script() {
-  awk '
-    /- name: Create GitHub Releases/ { in_step = 1; next }
-    in_step && /run: \|/ { in_run = 1; next }
-    in_run && /^$/ { print ""; next }
-    in_run && /^        / { sub(/^        /, ""); print; next }
-    in_run && !/^        / { exit }
-  ' "$repo_root/changie-auto-tag/action.yml"
+  # The action.yml step delegates to changie_auto_tag.py release; emit
+  # the same invocation so the test exercises the real production code.
+  printf 'python3 %q release\n' "$repo_root/changie-auto-tag/changie_auto_tag.py"
 }
 
 assert_eq() {
