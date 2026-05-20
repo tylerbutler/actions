@@ -31,6 +31,14 @@ required = [
     "case \"$target\" in",
     "hex)",
     "homebrew)",
+    "check-changelog:",
+    "create-release-pr:",
+    "tylerbutler/actions/changie-check@434af6fb683e908d5a2fab1b53849c2d54a86566",
+    "marocchino/sticky-pull-request-comment@v2",
+    "header: changie-check",
+    "steps.check.outputs.needs-entry == 'true'",
+    "tylerbutler/actions/changie-release@434af6fb683e908d5a2fab1b53849c2d54a86566",
+    "post-batch-command: ${{ inputs.post-batch-command }}",
 ]
 
 missing = [item for item in required if item not in text]

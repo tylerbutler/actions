@@ -78,6 +78,11 @@ on:
         required: false
         type: boolean
         default: true
+      create-release-pr:
+        description: 'Create or update the changie release PR on default-branch pushes'
+        required: false
+        type: boolean
+        default: true
       require-for-types:
         description: 'Comma-separated conventional commit types that require a changelog entry'
         required: false
@@ -221,5 +226,153 @@ jobs:
               echo "Validated publish targets: $normalized."
             else
               echo "No publish targets requested."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  check:
+    needs: validate
+    if: github.event_name == 'pull_request' && github.event.action != 'closed' && inputs.check-changelog
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # ratchet:actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read workspace
+        if: inputs.workspace-file != ''
+        id: workspace
+        uses: tylerbutler/actions/read-gleam-workspace@434af6fb683e908d5a2fab1b53849c2d54a86566 # ratchet:tylerbutler/actions/read-gleam-workspace@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          workspace-file: ${{ inputs.workspace-file }}
+
+      - name: Check changie entries
+        id: check
+        uses: tylerbutler/actions/changie-check@434af6fb683e908d5a2fab1b53849c2d54a86566 # ratchet:tylerbutler/actions/changie-check@main
+        with:
+          changie-version: ${{ inputs.changie-version }}
+          working-directory: ${{ inputs.working-directory }}
+          base-sha: ${{ github.event.pull_request.base.sha }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          projects: ${{ steps.workspace.outputs.projects || inputs.projects }}
+          require-for-types: ${{ inputs.require-for-types }}
+
+      - name: Build changie comment
+        id: comment
+        if: steps.check.outputs.has-entries == 'true' || steps.check.outputs.needs-entry == 'true'
+        shell: bash
+        env:
+          HAS_ENTRIES: ${{ steps.check.outputs.has-entries }}
+          PREVIEW: ${{ steps.check.outputs.preview }}
+          NEEDS_ENTRY: ${{ steps.check.outputs.needs-entry }}
+          COMMIT_TYPES_FOUND: ${{ steps.check.outputs.commit-types-found }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$HAS_ENTRIES" == "true" ]]; then
+            message="$PREVIEW"
+          elif [[ "$NEEDS_ENTRY" == "true" ]]; then
+            message="This PR appears to need a changelog entry. Commit types found: ${COMMIT_TYPES_FOUND:-unknown}."
+          else
+            message=""
+          fi
+
+          {
+            echo "message<<EOF_MESSAGE"
+            echo "$message"
+            echo "EOF_MESSAGE"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Comment on PR
+        if: steps.comment.outputs.message != ''
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: changie-check
+          message: ${{ steps.comment.outputs.message }}
+
+      - name: Fail when changelog entry is required
+        if: steps.check.outputs.needs-entry == 'true'
+        shell: bash
+        run: |
+          echo "::error::This PR needs a changelog entry."
+          exit 1
+
+      - name: Summarize changie check
+        if: always()
+        shell: bash
+        env:
+          HAS_ENTRIES: ${{ steps.check.outputs.has-entries }}
+          NEEDS_ENTRY: ${{ steps.check.outputs.needs-entry }}
+        run: |
+          {
+            echo "## Release workflow"
+            echo
+            if [[ "$HAS_ENTRIES" == "true" ]]; then
+              echo "Checked changie entries and posted a preview comment."
+            elif [[ "$NEEDS_ENTRY" == "true" ]]; then
+              echo "Checked changie entries and found a required missing entry."
+            else
+              echo "Checked changie entries; no changelog entry required."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  create-release-pr:
+    needs: validate
+    if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && inputs.create-release-pr
+    runs-on: ubuntu-latest
+    env:
+      HAS_APP_SECRETS: ${{ secrets.app-id != '' && secrets.app-private-key != '' }}
+    steps:
+      - name: Generate app token
+        if: env.HAS_APP_SECRETS == 'true'
+        id: app-token
+        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # ratchet:actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.app-id }}
+          private-key: ${{ secrets.app-private-key }}
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # ratchet:actions/checkout@v4
+        with:
+          token: ${{ steps.app-token.outputs.token || github.token }}
+
+      - name: Read workspace
+        if: inputs.workspace-file != ''
+        id: workspace
+        uses: tylerbutler/actions/read-gleam-workspace@434af6fb683e908d5a2fab1b53849c2d54a86566 # ratchet:tylerbutler/actions/read-gleam-workspace@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          workspace-file: ${{ inputs.workspace-file }}
+
+      - name: Create release pull request
+        id: release-pr
+        uses: tylerbutler/actions/changie-release@434af6fb683e908d5a2fab1b53849c2d54a86566 # ratchet:tylerbutler/actions/changie-release@main
+        with:
+          version: ${{ inputs.version }}
+          projects: ${{ steps.workspace.outputs.projects || inputs.projects }}
+          changie-version: ${{ inputs.changie-version }}
+          working-directory: ${{ inputs.working-directory }}
+          pr-title-template: ${{ inputs.pr-title-template }}
+          branch-template: ${{ inputs.branch-template }}
+          commit-message-template: ${{ inputs.commit-message-template }}
+          pr-body-template: ${{ inputs.pr-body-template }}
+          labels: ${{ inputs.labels }}
+          token: ${{ steps.app-token.outputs.token || github.token }}
+          version-files: ${{ steps.workspace.outputs.version-files || inputs.version-files }}
+          post-batch-command: ${{ inputs.post-batch-command }}
+
+      - name: Summarize release PR
+        shell: bash
+        env:
+          SKIPPED: ${{ steps.release-pr.outputs.skipped }}
+          PR_NUMBER: ${{ steps.release-pr.outputs.pr-number }}
+          VERSION: ${{ steps.release-pr.outputs.version }}
+        run: |
+          {
+            echo "## Release workflow"
+            echo
+            if [[ "$SKIPPED" == "true" ]]; then
+              echo "No unreleased changie fragments found; release PR creation skipped."
+            else
+              echo "Created or updated release PR #${PR_NUMBER} for ${VERSION}."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
