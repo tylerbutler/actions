@@ -12,6 +12,7 @@ Reusable composite actions for CI/CD workflows. Used across multiple repositorie
 | `setup-go` | Go environment with optional mise tool management |
 | `setup-rust` | Rust toolchain with caching |
 | `setup-node` | Node.js with pnpm/npm/yarn/bun |
+| `mise-setup` | Install mise and project-declared/ad-hoc tools; used standalone or by `setup-go` via `install-mise` |
 | `install-tools` | Install dev tools via taiki-e |
 | `changie-release` | Batch changie entries and create release PR (single or multi-project) |
 | `changie-auto-tag` | Create version tag(s) from latest changie release (single or multi-project) |
@@ -44,6 +45,8 @@ actions/
 │   └── action.yml      # Rust toolchain setup
 ├── setup-node/
 │   └── action.yml      # Node.js setup
+├── mise-setup/
+│   └── action.yml      # mise + tool installation (standalone or via setup-go's install-mise)
 ├── install-tools/
 │   └── action.yml      # Generic tool installer
 ├── changie-release/
@@ -79,6 +82,7 @@ Reusable workflows live in `.github/workflows/` and are called with `uses:` from
 
 | Workflow | Purpose |
 |----------|---------|
+| `release.yml` | High-level release orchestrator: PR changie check/comment, changie release PR creation, release PR auto-tagging, and Hex/Homebrew tag publishing |
 | `auto-tag.yml` | Tags releases when release PRs merge (wraps `changie-auto-tag` action) |
 | `gleam-workspace-ci.yml` | Matrix CI for Gleam monorepos using `read-gleam-workspace` |
 
@@ -182,6 +186,7 @@ Both actions are fully backward compatible:
 - `changie-auto-tag` supports optional `create-release` input to create a GitHub Release with changie version notes. Uses `.changes/{version}.md` (or `.changes/{project}/{version}.md` for multi-project) as release notes if available, falls back to `--generate-notes`
 - In multi-project mode, `changie-release` reads `projectsVersionSeparator` from `.changie.yaml` (defaults to `-`) to correctly parse version strings like `my-package-v1.0.0`
 - In multi-project mode, the branch name template replaces `{version}` with `next` instead of the version string, since comma-separated versions aren't valid branch names
+- `release.yml` is the high-level release orchestrator. Keep `auto-tag.yml` as the lower-level primitive for consumers that only want merge-to-tag behavior. Homebrew publishing goes through the existing dist-plan based `publish-homebrew-formula` action (`homebrew-dist-plan`, `homebrew-artifact-pattern`), not a direct formula-path input.
 
 - `gleam-publish` supports `replace-path-deps` input to rewrite path dependencies to Hex version ranges before publishing. Format: `dep-name:version-toml-path` per line. Reads version from the specified TOML file and generates a `">= X.Y.Z and < (X+1).0.0"` range (or `< 0.(Y+1).0` for pre-1.0). Essential for monorepos where sub-packages use `{ path = "..." }` deps during development
 - `read-gleam-workspace` parses `workspace.toml` with `[workspace]` section containing `members` (glob-enabled) and `exclude` arrays. Uses Python `tomllib` (stdlib). Topologically sorts packages by intra-workspace dependencies so output order is safe for publishing. Outputs: `packages` (space-separated paths), `projects` (comma-separated names), `version-files` (changie format), `packages-json` (JSON), `cache-hash-globs` (for hashFiles)
@@ -212,3 +217,11 @@ exclude = ["packages/my_lib_experimental"]
 ## Versioning
 
 This repo has no release process. Consumers pin to `@main`. There are no version tags.
+
+## Internal conventions
+
+- **Shared Python helpers** live in `_common/gha.py`. Action scripts inject `$GITHUB_ACTION_PATH/../_common` into `sys.path` and import from `gha` (`write_output`, `fail`, `append_summary`, `update_toml_top_level_key`, `parse_colon_entries`). Do not copy these helpers back into individual actions; add new ones to `_common/gha.py` with paired tests in `_common/test_gha.py`.
+
+- **Step summaries** follow the shape documented in `README.md`. Use `gha.append_summary()` from Python helpers; use `>> "$GITHUB_STEP_SUMMARY"` from inline bash.
+
+- **CI** runs on every PR (`.github/workflows/test.yml`): pytest across all Python helpers, the `tests/*-test.sh` integration scripts, and smoke tests that exercise the `setup-*` composite actions against fixtures under `tests/fixtures/`.

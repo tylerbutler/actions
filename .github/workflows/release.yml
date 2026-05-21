@@ -1,0 +1,545 @@
+name: Release
+
+on:
+  workflow_call:
+    inputs:
+      publish-to:
+        description: 'Comma-separated publish targets. Supported: hex, homebrew.'
+        required: false
+        type: string
+        default: ''
+      working-directory:
+        description: 'Directory containing .changie.yaml and release metadata'
+        required: false
+        type: string
+        default: '.'
+      changie-version:
+        description: 'Changie CLI version to install'
+        required: false
+        type: string
+        default: 'latest'
+      projects:
+        description: 'Comma-separated changie project keys'
+        required: false
+        type: string
+        default: ''
+      workspace-file:
+        description: 'Path to workspace.toml, relative to working-directory. Overrides projects when set.'
+        required: false
+        type: string
+        default: ''
+      version:
+        description: 'Version to batch: auto, major, minor, patch, or explicit semver. Ignored when projects is set.'
+        required: false
+        type: string
+        default: 'auto'
+      version-files:
+        description: 'Version files forwarded to changie-release'
+        required: false
+        type: string
+        default: ''
+      post-batch-command:
+        description: 'Command to run after changie batch and version bumps'
+        required: false
+        type: string
+        default: ''
+      release-label:
+        description: 'Label identifying release PRs for tag creation'
+        required: false
+        type: string
+        default: 'release'
+      labels:
+        description: 'Labels applied to release PRs created by changie-release'
+        required: false
+        type: string
+        default: 'release'
+      pr-title-template:
+        description: 'Release PR title template'
+        required: false
+        type: string
+        default: 'Release {version}'
+      branch-template:
+        description: 'Release PR branch template'
+        required: false
+        type: string
+        default: 'release/next'
+      commit-message-template:
+        description: 'Release commit message template'
+        required: false
+        type: string
+        default: 'chore(release): {version}'
+      pr-body-template:
+        description: 'Release PR body template'
+        required: false
+        type: string
+        default: '{changelog}'
+      check-changelog:
+        description: 'Run changie-check on pull requests'
+        required: false
+        type: boolean
+        default: true
+      create-release-pr:
+        description: 'Create or update the changie release PR on default-branch pushes'
+        required: false
+        type: boolean
+        default: true
+      require-for-types:
+        description: 'Comma-separated conventional commit types that require a changelog entry'
+        required: false
+        type: string
+        default: 'feat,fix,refactor,security'
+      create-release:
+        description: 'Create GitHub Releases from created tags'
+        required: false
+        type: boolean
+        default: false
+      wait-for-publish:
+        description: 'Wait for downstream publish workflow after each pushed tag'
+        required: false
+        type: boolean
+        default: false
+      publish-workflow-name:
+        description: 'Workflow name to wait for when wait-for-publish is true'
+        required: false
+        type: string
+        default: 'Publish'
+      hex-packages:
+        description: 'Space-separated package paths for gleam-publish. workspace-file output is used when this is empty.'
+        required: false
+        type: string
+        default: ''
+      hex-replace-path-deps:
+        description: 'replace-path-deps forwarded to gleam-publish'
+        required: false
+        type: string
+        default: ''
+      hex-skip-already-published:
+        description: 'Skip Hex versions that are already published'
+        required: false
+        type: boolean
+        default: true
+      homebrew-tap-repo:
+        description: 'Homebrew tap repo in owner/repo form'
+        required: false
+        type: string
+        default: ''
+      homebrew-dist-plan:
+        description: 'cargo-dist plan JSON for publish-homebrew-formula'
+        required: false
+        type: string
+        default: ''
+      homebrew-artifact-pattern:
+        description: 'Artifact pattern forwarded to publish-homebrew-formula'
+        required: false
+        type: string
+        default: 'artifacts-*'
+      homebrew-install-linuxbrew:
+        description: 'Install Linuxbrew and run brew style --fix before committing formula files'
+        required: false
+        type: boolean
+        default: true
+    outputs:
+      version:
+        description: 'Version(s) resolved by changie-auto-tag'
+        value: ${{ jobs.tag.outputs.version }}
+      tag:
+        description: 'Tag(s) resolved by changie-auto-tag'
+        value: ${{ jobs.tag.outputs.tag }}
+      created-tags:
+        description: 'Space-separated tags created by changie-auto-tag'
+        value: ${{ jobs.tag.outputs.created-tags }}
+    secrets:
+      hex-api-key:
+        description: 'Hex.pm API key'
+        required: false
+      app-id:
+        description: 'GitHub App ID for release PR/tag token generation'
+        required: false
+      app-private-key:
+        description: 'GitHub App private key for release PR/tag token generation'
+        required: false
+      homebrew-app-id:
+        description: 'GitHub App ID for Homebrew tap publishing'
+        required: false
+      homebrew-app-private-key:
+        description: 'GitHub App private key for Homebrew tap publishing'
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      publish-hex: ${{ steps.validate.outputs.publish-hex }}
+      publish-homebrew: ${{ steps.validate.outputs.publish-homebrew }}
+      publish-targets: ${{ steps.validate.outputs.publish-targets }}
+    steps:
+      - name: Validate release workflow inputs
+        id: validate
+        shell: bash
+        env:
+          PUBLISH_TO: ${{ inputs.publish-to }}
+        run: |
+          set -euo pipefail
+
+          publish_hex=false
+          publish_homebrew=false
+          normalized=""
+
+          IFS=',' read -ra targets <<< "$PUBLISH_TO"
+          for raw_target in "${targets[@]}"; do
+            target="$(echo "$raw_target" | xargs)"
+            if [[ -z "$target" ]]; then
+              continue
+            fi
+
+            case "$target" in
+              hex)
+                publish_hex=true
+                ;;
+              homebrew)
+                publish_homebrew=true
+                ;;
+              *)
+                echo "::error::unknown publish target '$target'. Supported targets: hex, homebrew"
+                exit 1
+                ;;
+            esac
+
+            normalized="${normalized:+$normalized,}$target"
+          done
+
+          {
+            echo "publish-hex=$publish_hex"
+            echo "publish-homebrew=$publish_homebrew"
+            echo "publish-targets=$normalized"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Release workflow"
+            echo
+            if [[ -n "$normalized" ]]; then
+              echo "Validated publish targets: $normalized."
+            else
+              echo "No publish targets requested."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  check:
+    needs: validate
+    if: github.event_name == 'pull_request' && github.event.action != 'closed' && inputs.check-changelog
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Read workspace
+        if: inputs.workspace-file != ''
+        id: workspace
+        uses: tylerbutler/actions/read-gleam-workspace@17116c2d3dfb57c2db7967fcecf0fc878e4cb6cf # ratchet:tylerbutler/actions/read-gleam-workspace@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          workspace-file: ${{ inputs.workspace-file }}
+
+      - name: Check changie entries
+        id: check
+        uses: tylerbutler/actions/changie-check@17116c2d3dfb57c2db7967fcecf0fc878e4cb6cf # ratchet:tylerbutler/actions/changie-check@main
+        with:
+          changie-version: ${{ inputs.changie-version }}
+          working-directory: ${{ inputs.working-directory }}
+          base-sha: ${{ github.event.pull_request.base.sha }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          projects: ${{ steps.workspace.outputs.projects || inputs.projects }}
+          require-for-types: ${{ inputs.require-for-types }}
+
+      - name: Build changie comment
+        id: comment
+        if: steps.check.outputs.has-entries == 'true' || steps.check.outputs.needs-entry == 'true'
+        shell: bash
+        env:
+          HAS_ENTRIES: ${{ steps.check.outputs.has-entries }}
+          PREVIEW: ${{ steps.check.outputs.preview }}
+          NEEDS_ENTRY: ${{ steps.check.outputs.needs-entry }}
+          COMMIT_TYPES_FOUND: ${{ steps.check.outputs.commit-types-found }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$HAS_ENTRIES" == "true" ]]; then
+            message="$PREVIEW"
+          elif [[ "$NEEDS_ENTRY" == "true" ]]; then
+            message="This PR appears to need a changelog entry. Commit types found: ${COMMIT_TYPES_FOUND:-unknown}."
+          else
+            message=""
+          fi
+
+          {
+            echo "message<<EOF_MESSAGE"
+            echo "$message"
+            echo "EOF_MESSAGE"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Comment on PR
+        if: steps.comment.outputs.message != ''
+        uses: marocchino/sticky-pull-request-comment@773744901bac0e8cbb5a0dc842800d45e9b2b405 # ratchet:marocchino/sticky-pull-request-comment@v2
+        with:
+          header: changie-check
+          message: ${{ steps.comment.outputs.message }}
+
+      - name: Fail when changelog entry is required
+        if: steps.check.outputs.needs-entry == 'true'
+        shell: bash
+        run: |
+          echo "::error::This PR needs a changelog entry."
+          exit 1
+
+      - name: Summarize changie check
+        if: always()
+        shell: bash
+        env:
+          HAS_ENTRIES: ${{ steps.check.outputs.has-entries }}
+          NEEDS_ENTRY: ${{ steps.check.outputs.needs-entry }}
+        run: |
+          {
+            echo "## Release workflow"
+            echo
+            if [[ "$HAS_ENTRIES" == "true" ]]; then
+              echo "Checked changie entries and posted a preview comment."
+            elif [[ "$NEEDS_ENTRY" == "true" ]]; then
+              echo "Checked changie entries and found a required missing entry."
+            else
+              echo "Checked changie entries; no changelog entry required."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  create-release-pr:
+    needs: validate
+    if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && inputs.create-release-pr
+    runs-on: ubuntu-latest
+    env:
+      HAS_APP_SECRETS: ${{ secrets.app-id != '' && secrets.app-private-key != '' }}
+    steps:
+      - name: Generate app token
+        if: env.HAS_APP_SECRETS == 'true'
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # ratchet:actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.app-id }}
+          private-key: ${{ secrets.app-private-key }}
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+        with:
+          token: ${{ steps.app-token.outputs.token || github.token }}
+
+      - name: Read workspace
+        if: inputs.workspace-file != ''
+        id: workspace
+        uses: tylerbutler/actions/read-gleam-workspace@17116c2d3dfb57c2db7967fcecf0fc878e4cb6cf # ratchet:tylerbutler/actions/read-gleam-workspace@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          workspace-file: ${{ inputs.workspace-file }}
+
+      - name: Create release pull request
+        id: release-pr
+        uses: tylerbutler/actions/changie-release@17116c2d3dfb57c2db7967fcecf0fc878e4cb6cf # ratchet:tylerbutler/actions/changie-release@main
+        with:
+          version: ${{ inputs.version }}
+          projects: ${{ steps.workspace.outputs.projects || inputs.projects }}
+          changie-version: ${{ inputs.changie-version }}
+          working-directory: ${{ inputs.working-directory }}
+          pr-title-template: ${{ inputs.pr-title-template }}
+          branch-template: ${{ inputs.branch-template }}
+          commit-message-template: ${{ inputs.commit-message-template }}
+          pr-body-template: ${{ inputs.pr-body-template }}
+          labels: ${{ inputs.labels }}
+          token: ${{ steps.app-token.outputs.token || github.token }}
+          version-files: ${{ steps.workspace.outputs.version-files || inputs.version-files }}
+          post-batch-command: ${{ inputs.post-batch-command }}
+
+      - name: Summarize release PR
+        shell: bash
+        env:
+          SKIPPED: ${{ steps.release-pr.outputs.skipped }}
+          PR_NUMBER: ${{ steps.release-pr.outputs.pr-number }}
+          VERSION: ${{ steps.release-pr.outputs.version }}
+        run: |
+          {
+            echo "## Release workflow"
+            echo
+            if [[ "$SKIPPED" == "true" ]]; then
+              echo "No unreleased changie fragments found; release PR creation skipped."
+            else
+              echo "Created or updated release PR #${PR_NUMBER} for ${VERSION}."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  tag:
+    needs: validate
+    if: github.event_name == 'pull_request' && github.event.pull_request.merged && contains(github.event.pull_request.labels.*.name, inputs.release-label)
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.auto-tag.outputs.version }}
+      tag: ${{ steps.auto-tag.outputs.tag }}
+      created-tags: ${{ steps.auto-tag.outputs.created-tags }}
+    env:
+      HAS_APP_SECRETS: ${{ secrets.app-id != '' && secrets.app-private-key != '' }}
+    steps:
+      - name: Generate app token
+        if: env.HAS_APP_SECRETS == 'true'
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # ratchet:actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.app-id }}
+          private-key: ${{ secrets.app-private-key }}
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+        with:
+          token: ${{ steps.app-token.outputs.token || github.token }}
+
+      - name: Read workspace
+        if: inputs.workspace-file != ''
+        id: workspace
+        uses: tylerbutler/actions/read-gleam-workspace@17116c2d3dfb57c2db7967fcecf0fc878e4cb6cf # ratchet:tylerbutler/actions/read-gleam-workspace@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          workspace-file: ${{ inputs.workspace-file }}
+
+      - name: Auto-tag release
+        id: auto-tag
+        uses: tylerbutler/actions/changie-auto-tag@17116c2d3dfb57c2db7967fcecf0fc878e4cb6cf # ratchet:tylerbutler/actions/changie-auto-tag@main
+        with:
+          changie-version: ${{ inputs.changie-version }}
+          working-directory: ${{ inputs.working-directory }}
+          projects: ${{ steps.workspace.outputs.projects || inputs.projects }}
+          create-release: ${{ inputs.create-release }}
+          wait-for-publish: ${{ inputs.wait-for-publish }}
+          publish-workflow-name: ${{ inputs.publish-workflow-name }}
+          token: ${{ steps.app-token.outputs.token || github.token }}
+
+      - name: Summarize tags
+        shell: bash
+        env:
+          CREATED_TAGS: ${{ steps.auto-tag.outputs.created-tags }}
+        run: |
+          {
+            echo "## Release workflow"
+            echo
+            if [[ -n "$CREATED_TAGS" ]]; then
+              echo "Created tags: $CREATED_TAGS."
+            else
+              echo "No new tags created."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish-hex:
+    needs: validate
+    if: startsWith(github.ref, 'refs/tags/') && needs.validate.outputs.publish-hex == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate Hex inputs
+        shell: bash
+        env:
+          HEX_API_KEY: ${{ secrets.hex-api-key }}
+        run: |
+          if [[ -n "$HEX_API_KEY" ]]; then
+            exit 0
+          fi
+          echo "::error::publish-to includes 'hex', but secret hex-api-key is missing"
+          exit 1
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+
+      - name: Read workspace
+        if: inputs.workspace-file != ''
+        id: workspace
+        uses: tylerbutler/actions/read-gleam-workspace@17116c2d3dfb57c2db7967fcecf0fc878e4cb6cf # ratchet:tylerbutler/actions/read-gleam-workspace@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          workspace-file: ${{ inputs.workspace-file }}
+          tag: ${{ github.ref_name }}
+
+      - name: Resolve Hex packages
+        id: packages
+        shell: bash
+        env:
+          WORKSPACE_PACKAGES: ${{ steps.workspace.outputs.packages }}
+          INPUT_PACKAGES: ${{ inputs.hex-packages }}
+        run: |
+          set -euo pipefail
+          packages="${WORKSPACE_PACKAGES:-$INPUT_PACKAGES}"
+          if [[ -z "$packages" ]]; then
+            echo "::error::publish-to includes 'hex', but no packages were resolved. Set workspace-file or hex-packages."
+            exit 1
+          fi
+          echo "packages=$packages" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to Hex
+        id: publish
+        uses: tylerbutler/actions/gleam-publish@17116c2d3dfb57c2db7967fcecf0fc878e4cb6cf # ratchet:tylerbutler/actions/gleam-publish@main
+        with:
+          packages: ${{ steps.packages.outputs.packages }}
+          working-directory: ${{ inputs.working-directory }}
+          hex-api-key: ${{ secrets.hex-api-key }}
+          skip-already-published: ${{ inputs.hex-skip-already-published }}
+          replace-path-deps: ${{ inputs.hex-replace-path-deps }}
+
+      - name: Summarize Hex publish
+        shell: bash
+        env:
+          PUBLISHED: ${{ steps.publish.outputs.published }}
+          SKIPPED: ${{ steps.publish.outputs.skipped }}
+        run: |
+          {
+            echo "## Release workflow"
+            echo
+            echo "Published Hex packages: ${PUBLISHED:-none}; skipped: ${SKIPPED:-none}."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish-homebrew:
+    needs: validate
+    if: startsWith(github.ref, 'refs/tags/') && needs.validate.outputs.publish-homebrew == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate Homebrew inputs
+        shell: bash
+        env:
+          APP_ID: ${{ secrets.homebrew-app-id }}
+          PRIVATE_KEY: ${{ secrets.homebrew-app-private-key }}
+          TAP_REPO: ${{ inputs.homebrew-tap-repo }}
+          PLAN: ${{ inputs.homebrew-dist-plan }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [[ -n "$APP_ID" ]] || missing+=("secret homebrew-app-id")
+          [[ -n "$PRIVATE_KEY" ]] || missing+=("secret homebrew-app-private-key")
+          [[ -n "$TAP_REPO" ]] || missing+=("input homebrew-tap-repo")
+          [[ -n "$PLAN" ]] || missing+=("input homebrew-dist-plan")
+          if [[ "${#missing[@]}" -gt 0 ]]; then
+            printf '::error::publish-to includes homebrew, but these values are missing: %s\n' "${missing[*]}"
+            exit 1
+          fi
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+
+      - name: Publish Homebrew formula
+        uses: tylerbutler/actions/publish-homebrew-formula@17116c2d3dfb57c2db7967fcecf0fc878e4cb6cf # ratchet:tylerbutler/actions/publish-homebrew-formula@main
+        with:
+          app-id: ${{ secrets.homebrew-app-id }}
+          private-key: ${{ secrets.homebrew-app-private-key }}
+          tap-repo: ${{ inputs.homebrew-tap-repo }}
+          plan: ${{ inputs.homebrew-dist-plan }}
+          artifact-pattern: ${{ inputs.homebrew-artifact-pattern }}
+          install-linuxbrew: ${{ inputs.homebrew-install-linuxbrew }}
+
+      - name: Summarize Homebrew publish
+        shell: bash
+        run: |
+          {
+            echo "## Release workflow"
+            echo
+            echo "Published Homebrew formula artifacts to ${{ inputs.homebrew-tap-repo }}."
+          } >> "$GITHUB_STEP_SUMMARY"

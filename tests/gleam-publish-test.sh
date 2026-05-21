@@ -6,13 +6,9 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 extract_rewrite_script() {
-  awk '
-    /- name: Rewrite path dependencies/ { in_step = 1; next }
-    in_step && /run: \|/ { in_run = 1; next }
-    in_run && /^$/ { print ""; next }
-    in_run && /^        / { sub(/^        /, ""); print; next }
-    in_run && !/^        / { exit }
-  ' "$repo_root/gleam-publish/action.yml"
+  # The action.yml step delegates to gleam_publish.py rewrite-path-deps;
+  # emit the same invocation so the test exercises the real production code.
+  printf 'python3 %q rewrite-path-deps\n' "$repo_root/gleam-publish/gleam_publish.py"
 }
 
 assert_file_contains() {

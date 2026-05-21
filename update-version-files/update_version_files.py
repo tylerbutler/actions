@@ -17,26 +17,25 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sys
 import tomllib
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "_common"))
+
+from gha import append_summary, fail, parse_colon_entries, update_toml_top_level_key  # noqa: E402
+
 
 def parse_entries(text: str) -> list[tuple[str, str]]:
     """Parse newline-separated `path:key` entries, ignoring blank lines."""
+    try:
+        raw_entries = parse_colon_entries(text, fields=2)
+    except ValueError as e:
+        raise ValueError(f"Invalid entry: expected 'path:key' ({e})") from e
     entries: list[tuple[str, str]] = []
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        if ":" not in line:
-            raise ValueError(f"Invalid entry {raw_line!r}: expected 'path:key'")
-        path, key = line.split(":", 1)
-        path = path.strip()
-        key = key.strip()
+    for path, key in raw_entries:
         if not path or not key:
-            raise ValueError(f"Invalid entry {raw_line!r}: empty path or key")
+            raise ValueError(f"Invalid entry {path!r}:{key!r}: empty path or key")
         entries.append((path, key))
     return entries
 
@@ -51,77 +50,33 @@ def find_ancestor_package_json(toml_path: Path) -> Path | None:
     return None
 
 
-def _top_level_region_end(content: str) -> int:
-    """Return the offset of the first `[table]` header, or len(content) if none."""
-    match = re.search(r"^[ \t]*\[", content, re.MULTILINE)
-    return match.start() if match else len(content)
-
-
-def update_toml_top_level_key(content: str, key: str, new_value: str) -> str:
-    """Replace the top-level `key = "..."` string assignment in `content`.
-
-    Raises:
-        tomllib.TOMLDecodeError: if `content` is not valid TOML.
-        KeyError: if `key` is not a top-level key.
-        TypeError: if the top-level `key` is not a string value.
-        ValueError: if exactly one matching assignment line cannot be located.
-    """
-    data = tomllib.loads(content)
-    if key not in data:
-        raise KeyError(f"Top-level key {key!r} not found")
-    if not isinstance(data[key], str):
-        raise TypeError(f"Top-level key {key!r} is not a string value")
-
-    end = _top_level_region_end(content)
-    head, tail = content[:end], content[end:]
-
-    pattern = re.compile(
-        rf'^({re.escape(key)}[ \t]*=[ \t]*)"[^"\n]*"',
-        re.MULTILINE,
-    )
-    new_head, count = pattern.subn(
-        lambda m: f'{m.group(1)}"{new_value}"', head
-    )
-    if count != 1:
-        raise ValueError(
-            f"Expected exactly one top-level {key!r} assignment, found {count}"
-        )
-    return new_head + tail
-
-
-def _fail(message: str) -> "None":
-    """Emit a GitHub Actions error annotation and exit non-zero."""
-    print(f"::error::{message}", file=sys.stderr)
-    sys.exit(1)
-
-
 def main() -> None:
     text = os.environ.get("VERSION_FILES", "")
     try:
         entries = parse_entries(text)
     except ValueError as e:
-        _fail(str(e))
+        fail(str(e))
         return
 
     for path_str, key in entries:
         toml_path = Path(path_str)
         if not toml_path.is_file():
-            _fail(f"TOML file not found: {path_str}")
+            fail(f"TOML file not found: {path_str}")
 
         pkg_json = find_ancestor_package_json(toml_path)
         if pkg_json is None:
-            _fail(f"No package.json found in ancestor directories of {path_str}")
+            fail(f"No package.json found in ancestor directories of {path_str}")
             return  # for type-checkers; _fail exits
 
         try:
             pkg_data = json.loads(pkg_json.read_text(encoding="utf-8"))
         except json.JSONDecodeError as e:
-            _fail(f"Failed to parse {pkg_json}: {e}")
+            fail(f"Failed to parse {pkg_json}: {e}")
             return
 
         version = pkg_data.get("version")
         if not version or not isinstance(version, str):
-            _fail(f"No string `version` field in {pkg_json}")
+            fail(f"No string `version` field in {pkg_json}")
             return
 
         try:
@@ -133,12 +88,18 @@ def main() -> None:
             ValueError,
             tomllib.TOMLDecodeError,
         ) as e:
-            _fail(f"Failed to update {path_str}: {e}")
+            fail(f"Failed to update {path_str}: {e}")
             return
 
         if new_content != content:
             toml_path.write_text(new_content, encoding="utf-8")
         print(f'Updated {path_str}: {key} = "{version}" (from {pkg_json})')
+
+    append_summary("## Update Version Files")
+    if entries:
+        append_summary(f"Updated {len(entries)} TOML file(s) from package.json.")
+    else:
+        append_summary("No entries to update; skipped.")
 
 
 if __name__ == "__main__":

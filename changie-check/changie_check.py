@@ -15,7 +15,10 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import NoReturn
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "_common"))
+
+from gha import fail, write_output  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -107,25 +110,6 @@ def _changie_batch_dry_run(project: str | None, cwd: Path) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _write_output(key: str, value: str) -> None:
-    out_file = os.environ.get("GITHUB_OUTPUT")
-    if "\n" in value:
-        sentinel = f"EOF_{re.sub(r'[^A-Z0-9]', '_', key.upper())}"
-        block = f"{key}<<{sentinel}\n{value}\n{sentinel}\n"
-    else:
-        block = f"{key}={value}\n"
-    if out_file:
-        with open(out_file, "a", encoding="utf-8") as f:
-            f.write(block)
-    else:
-        sys.stdout.write(block)
-
-
-def _fail(message: str) -> NoReturn:
-    print(f"::error::{message}", file=sys.stderr)
-    sys.exit(1)
-
-
 def _split_csv(text: str) -> list[str]:
     return [p.strip() for p in text.split(",") if p.strip()]
 
@@ -148,17 +132,17 @@ def cmd_detect_fragments() -> None:
     head = os.environ.get("HEAD_SHA", "")
     config = _load_changie_config(cwd)
     unreleased_path = f"{config['changesDir']}/{config['unreleasedDir']}"
-    _write_output("unreleased-path", unreleased_path)
+    write_output("unreleased-path", unreleased_path)
 
     fragments = _git_diff_added(base, head, f"{unreleased_path}/*.yaml", cwd)
     if fragments:
         print(f"Found {len(fragments)} changie fragment(s) added in this PR")
-        _write_output("has-entries", "true")
-        _write_output("fragments", "\n".join(fragments))
+        write_output("has-entries", "true")
+        write_output("fragments", "\n".join(fragments))
     else:
         print("No changie fragments added in this PR")
-        _write_output("has-entries", "false")
-        _write_output("fragments", "")
+        write_output("has-entries", "false")
+        write_output("fragments", "")
 
 
 def cmd_render_preview() -> None:
@@ -188,7 +172,7 @@ def cmd_render_preview() -> None:
     else:
         preview = _changie_batch_dry_run(None, cwd)
 
-    _write_output("preview", preview)
+    write_output("preview", preview)
 
 
 def cmd_check_required() -> None:
@@ -201,25 +185,25 @@ def cmd_check_required() -> None:
     types = parse_conventional_types(log)
     if not types:
         print("No conventional commit types found")
-        _write_output("needs-entry", "false")
-        _write_output("commit-types-found", "")
+        write_output("needs-entry", "false")
+        write_output("commit-types-found", "")
         return
 
     types_csv = ",".join(sorted(types))
-    _write_output("commit-types-found", types_csv)
+    write_output("commit-types-found", types_csv)
     print(f"Conventional commit types found: {types_csv}")
 
     if has_breaking_marker(log):
         print("Breaking change detected — changelog entry required")
-        _write_output("needs-entry", "true")
+        write_output("needs-entry", "true")
         return
 
     if needs_changelog_entry(types, required):
         match = next(t for t in types if t in set(required))
         print(f"Commit type {match!r} requires a changelog entry")
-        _write_output("needs-entry", "true")
+        write_output("needs-entry", "true")
     else:
-        _write_output("needs-entry", "false")
+        write_output("needs-entry", "false")
 
 
 # ---------------------------------------------------------------------------

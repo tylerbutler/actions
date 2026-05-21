@@ -1,0 +1,139 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    name: pytest (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # ratchet:actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install mise tools
+        uses: ./mise-setup
+        with:
+          working-directory: .
+      - name: Run pytest
+        run: mise exec -- uvx pytest -v
+
+  bash-tests:
+    name: bash integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+      - name: Run integration scripts
+        run: |
+          for script in tests/*-test.sh; do
+            echo "=== $script ==="
+            bash "$script"
+          done
+
+  smoke:
+    name: smoke (${{ matrix.action }} on ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        action: [setup-gleam, setup-go, setup-rust, setup-node, mise-setup]
+        os: [ubuntu-latest, macos-latest]
+        exclude:
+          # erlef/setup-beam doesn't support macos-latest (arm64) for the
+          # Erlang/Gleam versions in our fixture — spawn ENOEXEC trying to
+          # exec x86_64 binaries on Apple Silicon. Track upstream support
+          # and re-enable when fixed.
+          - action: setup-gleam
+            os: macos-latest
+        include:
+          - action: install-tools
+            os: ubuntu-latest
+          - action: run-gleam-workspace
+            os: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+
+      - name: setup-gleam smoke
+        if: matrix.action == 'setup-gleam'
+        uses: ./setup-gleam
+        with:
+          working-directory: tests/fixtures/setup-gleam
+          version-file: tests/fixtures/setup-gleam/.tool-versions
+          run-deps: 'false'
+      - name: setup-gleam assertion
+        if: matrix.action == 'setup-gleam'
+        run: gleam --version
+
+      - name: setup-go smoke
+        if: matrix.action == 'setup-go'
+        uses: ./setup-go
+        with:
+          working-directory: tests/fixtures/setup-go
+          go-version-file: tests/fixtures/setup-go/go.mod
+          run-deps: 'false'
+          cache: 'false'
+          install-mise: 'true'
+      - name: setup-go assertion
+        if: matrix.action == 'setup-go'
+        run: go version
+      - name: setup-go mise assertion
+        if: matrix.action == 'setup-go'
+        shell: bash
+        working-directory: tests/fixtures/setup-go
+        run: mise exec -- jq --version
+
+      - name: setup-rust smoke
+        if: matrix.action == 'setup-rust'
+        uses: ./setup-rust
+      - name: setup-rust assertion
+        if: matrix.action == 'setup-rust'
+        run: rustc --version
+
+      - name: setup-node smoke
+        if: matrix.action == 'setup-node'
+        uses: ./setup-node
+        with:
+          working-directory: tests/fixtures/setup-node
+          run-install: 'false'
+          cache: 'false'
+      - name: setup-node assertion
+        if: matrix.action == 'setup-node'
+        run: node --version
+
+      - name: install-tools smoke
+        if: matrix.action == 'install-tools'
+        uses: ./install-tools
+        with:
+          tools: just
+      - name: install-tools assertion
+        if: matrix.action == 'install-tools'
+        run: just --version
+
+      - name: mise-setup smoke
+        if: matrix.action == 'mise-setup'
+        uses: ./mise-setup
+        with:
+          working-directory: tests/fixtures/mise-setup
+      - name: mise-setup assertion
+        if: matrix.action == 'mise-setup'
+        working-directory: tests/fixtures/mise-setup
+        shell: bash
+        run: mise exec -- jq --version
+
+      - name: run-gleam-workspace smoke
+        if: matrix.action == 'run-gleam-workspace'
+        uses: ./run-gleam-workspace
+        with:
+          packages: packages/demo
+          command: 'echo hello-from-$(basename "$PWD")'
+          working-directory: tests/fixtures/run-gleam-workspace

@@ -11,6 +11,15 @@ runs:
   using: composite
   steps:
     - name: Install Tools
-      uses: taiki-e/install-action@4573997e3b6c0fbc22f7acab193b00a8a3ca817d # ratchet:taiki-e/install-action@v2
+      uses: taiki-e/install-action@213ccc1a076163c093f914550b94feb90fab916d # ratchet:taiki-e/install-action@v2
       with:
         tool: ${{ inputs.tools }}
+
+    - name: Write step summary
+      shell: bash
+      run: |
+        {
+          echo "## Install Development Tools"
+          echo
+          echo "Installed: \`${{ inputs.tools }}\`."
+        } >> "$GITHUB_STEP_SUMMARY"
