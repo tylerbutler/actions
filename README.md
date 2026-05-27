@@ -18,6 +18,72 @@ Skipped or no-op runs still emit a section so the summary is a faithful record o
 
 ## Available Actions
 
+### setup-licence-audit
+
+Install the released `licence_audit` escript and optionally set up Erlang/OTP.
+
+```yaml
+- uses: tylerbutler/actions/setup-licence-audit@v1
+  with:
+    version: v1.0.0
+```
+
+**Inputs:**
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `version` | Required | `licence_audit` GitHub Release tag to install. |
+| `setup-beam` | `true` | Set up Erlang/OTP before installing `licence_audit`. |
+| `otp-version` | `28` | Erlang/OTP version to install when `setup-beam` is `true`. |
+
+**Example (default Beam setup):**
+
+```yaml
+jobs:
+  licence-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: tylerbutler/actions/setup-licence-audit@v1
+        with:
+          version: v1.0.0
+      - run: licence_audit check
+```
+
+**Example (Beam already installed):**
+
+```yaml
+jobs:
+  licence-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: '28'
+      - uses: tylerbutler/actions/setup-licence-audit@v1
+        with:
+          version: v1.0.0
+          setup-beam: 'false'
+      - run: licence_audit check
+```
+
+**Example (Gleam project):**
+
+```yaml
+jobs:
+  licence-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: tylerbutler/actions/setup-gleam@v1
+      - uses: tylerbutler/actions/setup-licence-audit@v1
+        with:
+          version: v1.0.0
+          setup-beam: 'false'
+      - run: licence_audit check
+```
+
 ### setup-gleam
 
 Setup Gleam/BEAM environment with caching, optional Elixir, and optional JavaScript target support.

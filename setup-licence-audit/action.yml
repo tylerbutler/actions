@@ -1,0 +1,66 @@
+name: 'Setup licence_audit'
+description: 'Install the licence_audit escript for GitHub Actions workflows'
+
+inputs:
+  version:
+    description: 'licence_audit GitHub Release tag to install, such as v1.0.0'
+    required: true
+  setup-beam:
+    description: 'Whether to set up Erlang/OTP before installing licence_audit'
+    required: false
+    default: 'true'
+  otp-version:
+    description: 'Erlang/OTP version to install when setup-beam is true'
+    required: false
+    default: '28'
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Erlang/OTP
+      if: inputs.setup-beam == 'true'
+      uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # ratchet:erlef/setup-beam@v1
+      with:
+        otp-version: ${{ inputs.otp-version }}
+
+    - name: Install licence_audit
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        RUNNER_TEMP: ${{ runner.temp }}
+      run: |
+        set -euo pipefail
+
+        if [[ -z "$VERSION" ]]; then
+          echo "The licence_audit version input is required." >&2
+          echo "Set it to a release tag such as v1.0.0." >&2
+          exit 1
+        fi
+
+        case "$VERSION" in
+          v*) ;;
+          *)
+            echo "The licence_audit version input must be a release tag like v1.0.0; got '$VERSION'." >&2
+            exit 1
+            ;;
+        esac
+
+        install_dir="$RUNNER_TEMP/licence_audit-$VERSION"
+        archive="$RUNNER_TEMP/licence_audit-$VERSION.tar.gz"
+        url="https://github.com/tylerbutler/licence_audit/releases/download/$VERSION/licence_audit-$VERSION.tar.gz"
+
+        rm -rf "$install_dir"
+        mkdir -p "$install_dir"
+
+        curl --fail --location --show-error --silent "$url" --output "$archive"
+        tar -xzf "$archive" --strip-components=1 -C "$install_dir"
+        chmod +x "$install_dir/licence_audit"
+        echo "$install_dir" >> "$GITHUB_PATH"
+
+        "$install_dir/licence_audit" --help >/dev/null
+
+        {
+          echo "## Setup licence_audit"
+          echo
+          echo "Installed licence_audit $VERSION."
+        } >> "$GITHUB_STEP_SUMMARY"
