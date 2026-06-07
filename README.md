@@ -389,16 +389,17 @@ Batch [changie](https://changie.dev/) changelog entries and create a release pul
 
 **Version file bumping:**
 
-The `version-files` input accepts a newline-separated list of `path:key` pairs pointing to TOML files that should be updated with the release version (without `v` prefix). Only top-level TOML keys are supported.
+The `version-files` input accepts a newline-separated list of `path:key-path` pairs pointing to TOML files that should be updated with the release version (without `v` prefix). TOML dotted key paths are supported, so nested values like Cargo's `[package].version` can be updated with `package.version`.
 
 ```yaml
 - uses: tylerbutler/actions/changie-release@main
   with:
     version-files: |
       gleam.toml:version
+      Cargo.toml:package.version
 ```
 
-This replaces `version = "..."` in `gleam.toml` with the new version. The change is included in the same commit as the changelog update — no extra git operations needed.
+This replaces `version = "..."` in `gleam.toml` and `[package].version` in `Cargo.toml` with the new version. The change is included in the same commit as the changelog update — no extra git operations needed.
 
 **Post-batch command:**
 

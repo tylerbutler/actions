@@ -119,7 +119,7 @@ projects:
 - Each project is batched independently with `changie batch auto --project X`
 - Projects with no unreleased changes are skipped
 - `version` output contains comma-separated versions: `my-package-v1.0.0, my-package-plugin-v0.2.0`
-- `version-files` uses `project:path:key` format (three colon-separated fields)
+- `version-files` uses `project:path:key-path` format (three colon-separated fields)
 - Only projects that were actually batched have their version files bumped
 - Branch name uses `release/next` (since multiple versions don't make valid branch names)
 - `batched-projects` output lists which projects had changes
@@ -172,7 +172,7 @@ With projects configured, changie organizes files as:
 
 Both actions are fully backward compatible:
 - When `projects` input is empty (default), all behavior is identical to before
-- Single-project `version-files` format (`path:key`) is unchanged
+- Single-project `version-files` format (`path:key-path`) remains backward-compatible with bare top-level keys like `version`
 - All existing outputs work the same way for single-project repos
 
 ## Changie Action Gotchas
@@ -181,7 +181,7 @@ Both actions are fully backward compatible:
 - `changie batch auto` exits non-zero when no unreleased fragments exist - `changie-release` pre-checks the unreleased directory before calling batch
 - `changie-release` reads `.changie.yaml` to find the unreleased directory path (`changesDir`/`unreleasedDir`)
 - PR body template supports `{version}` and `{changelog}` variables resolved via bash substitution
-- `changie-release` supports `version-files` input for bumping version in TOML files (only TOML is supported). Single-project format: `path:key` per line. Multi-project format: `project:path:key` per line. Only top-level keys are supported. Changes are included in the same commit as the changelog update via `peter-evans/create-pull-request`
+- `changie-release` supports `version-files` input for bumping version in TOML files (only TOML is supported). Single-project format: `path:key-path` per line. Multi-project format: `project:path:key-path` per line. TOML dotted key paths are supported (for example, `Cargo.toml:package.version`). Changes are included in the same commit as the changelog update via `peter-evans/create-pull-request`
 - `changie-release` supports `post-batch-command` input to run a shell command after version bumps but before the PR commit. Useful for refreshing lockfiles (e.g., `gleam deps download`) so the release PR includes up-to-date manifests
 - `changie-auto-tag` supports optional `create-release` input to create a GitHub Release with changie version notes. Uses `.changes/{version}.md` (or `.changes/{project}/{version}.md` for multi-project) as release notes if available, falls back to `--generate-notes`
 - In multi-project mode, `changie-release` reads `projectsVersionSeparator` from `.changie.yaml` (defaults to `-`) to correctly parse version strings like `my-package-v1.0.0`
@@ -220,7 +220,7 @@ This repo has no release process. Consumers pin to `@main`. There are no version
 
 ## Internal conventions
 
-- **Shared Python helpers** live in `_common/gha.py`. Action scripts inject `$GITHUB_ACTION_PATH/../_common` into `sys.path` and import from `gha` (`write_output`, `fail`, `append_summary`, `update_toml_top_level_key`, `parse_colon_entries`). Do not copy these helpers back into individual actions; add new ones to `_common/gha.py` with paired tests in `_common/test_gha.py`.
+- **Shared Python helpers** live in `_common/gha.py`. Action scripts inject `$GITHUB_ACTION_PATH/../_common` into `sys.path` and import from `gha` (`write_output`, `fail`, `append_summary`, `update_toml_file_key`, `parse_colon_entries`). Do not copy these helpers back into individual actions; add new ones to `_common/gha.py` with paired tests in `_common/test_gha.py`.
 
 - **Step summaries** follow the shape documented in `README.md`. Use `gha.append_summary()` from Python helpers; use `>> "$GITHUB_STEP_SUMMARY"` from inline bash.
 

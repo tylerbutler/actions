@@ -24,7 +24,6 @@ from changie_release import (  # noqa: E402
     parse_version_files,
     resolve_template,
     strip_version_prefix,
-    update_toml_top_level_key,
 )
 
 
@@ -84,31 +83,16 @@ class TestStripVersionPrefix:
         assert strip_version_prefix("v9.9.9", "my-pkg", "-") == "9.9.9"
 
 
-# --- update_toml_top_level_key (sanity, full coverage lives in update-version-files) ---
-
-class TestUpdateTomlTopLevelKey:
-    def test_simple_replace(self):
-        result = update_toml_top_level_key('version = "1.0.0"\n', "version", "2.0.0")
-        assert result == 'version = "2.0.0"\n'
-
-    def test_ignores_same_named_key_in_table(self):
-        content = (
-            'version = "0.1.0"\n'
-            "\n"
-            "[tool.poetry]\n"
-            'version = "9.9.9"\n'
-        )
-        result = update_toml_top_level_key(content, "version", "0.2.0")
-        assert 'version = "0.2.0"' in result
-        assert 'version = "9.9.9"' in result
-
-
 # --- parse_version_files ---
 
 class TestParseVersionFiles:
     def test_single_project(self):
         entries = parse_version_files("gleam.toml:version", multi_project=False)
         assert entries == [{"project": None, "path": "gleam.toml", "key": "version"}]
+
+    def test_single_project_nested_key_path(self):
+        entries = parse_version_files("Cargo.toml:package.version", multi_project=False)
+        assert entries == [{"project": None, "path": "Cargo.toml", "key": "package.version"}]
 
     def test_multi_project(self):
         entries = parse_version_files("pkg:gleam.toml:version", multi_project=True)
@@ -128,11 +112,11 @@ class TestParseVersionFiles:
         assert len(entries) == 1
 
     def test_single_rejects_three_fields(self):
-        with pytest.raises(ValueError, match="path:key"):
+        with pytest.raises(ValueError, match="path:key-path"):
             parse_version_files("a:b:c", multi_project=False)
 
     def test_multi_rejects_two_fields(self):
-        with pytest.raises(ValueError, match="project:path:key"):
+        with pytest.raises(ValueError, match="project:path:key-path"):
             parse_version_files("a:b", multi_project=True)
 
 
@@ -338,12 +322,37 @@ class TestBumpFiles:
     def test_single_project_bumps_version(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         (tmp_path / "gleam.toml").write_text('name = "x"\nversion = "0.0.0"\n')
+
+        def fake_update(path: Path, key: str, value: str) -> None:
+            assert key == "version"
+            path.write_text('name = "x"\nversion = "1.2.3"\n')
+
+        monkeypatch.setattr(changie_release, "update_toml_file_key", fake_update)
         monkeypatch.setenv("PROJECTS", "")
         monkeypatch.setenv("VERSION", "v1.2.3")
         monkeypatch.setenv("VERSION_FILES", "gleam.toml:version")
         monkeypatch.setenv("WORKING_DIRECTORY", ".")
         cmd_bump_files()
         assert (tmp_path / "gleam.toml").read_text() == 'name = "x"\nversion = "1.2.3"\n'
+
+    def test_single_project_bumps_nested_version(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "Cargo.toml").write_text('[package]\nversion = "0.0.0"\n')
+        calls: list[tuple[Path, str, str]] = []
+
+        def fake_update(path: Path, key: str, value: str) -> None:
+            calls.append((path, key, value))
+            path.write_text('[package]\nversion = "1.2.3"\n')
+
+        monkeypatch.setattr(changie_release, "update_toml_file_key", fake_update)
+        monkeypatch.setenv("PROJECTS", "")
+        monkeypatch.setenv("VERSION", "v1.2.3")
+        monkeypatch.setenv("VERSION_FILES", "Cargo.toml:package.version")
+        monkeypatch.setenv("WORKING_DIRECTORY", ".")
+        cmd_bump_files()
+
+        assert calls == [(Path("Cargo.toml"), "package.version", "1.2.3")]
+        assert (tmp_path / "Cargo.toml").read_text() == '[package]\nversion = "1.2.3"\n'
 
     def test_multi_project_skips_unbatched(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
@@ -354,6 +363,10 @@ class TestBumpFiles:
         (pkg_a / "gleam.toml").write_text('version = "0.0.0"\n')
         (pkg_b / "gleam.toml").write_text('version = "0.0.0"\n')
 
+        def fake_update(path: Path, key: str, value: str) -> None:
+            path.write_text(f'{key} = "{value}"\n')
+
+        monkeypatch.setattr(changie_release, "update_toml_file_key", fake_update)
         monkeypatch.setenv("PROJECTS", "pkg-a,pkg-b")
         monkeypatch.setenv("BATCHED", "pkg-a")  # only pkg-a was batched
         monkeypatch.setenv(
