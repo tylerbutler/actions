@@ -168,6 +168,13 @@ def _git_create_tag(tag: str, cwd: Path) -> None:
         raise RuntimeError(f"git tag {tag} failed: {r.stderr.strip()}")
 
 
+def _git_head_sha(cwd: Path) -> str:
+    r = _run(["git", "rev-parse", "HEAD"], cwd)
+    if r.returncode != 0:
+        raise RuntimeError(f"git rev-parse HEAD failed: {r.stderr.strip()}")
+    return r.stdout.strip()
+
+
 def _git_push_tag(tag: str, cwd: Path) -> None:
     r = _run(["git", "push", "origin", tag], cwd)
     if r.returncode != 0:
@@ -202,14 +209,26 @@ def _gh_get_run(run_id: int) -> dict:
     return json.loads(r.stdout or "{}")
 
 
+def _gh_release_exists(tag: str, cwd: Path) -> bool:
+    r = _run(["gh", "release", "view", tag], cwd)
+    return r.returncode == 0
+
+
 def _gh_release_create(
     tag: str,
     title: str,
     notes_file: Path | None,
     generate_notes: bool,
     cwd: Path,
+    target: str | None = None,
 ) -> None:
+    if _gh_release_exists(tag, cwd):
+        print(f"Release {tag} already exists, skipping creation")
+        return
+
     cmd = ["gh", "release", "create", tag, "--title", title]
+    if target is not None:
+        cmd += ["--target", target]
     if notes_file is not None:
         cmd += ["--notes-file", str(notes_file)]
     elif generate_notes:
@@ -269,16 +288,39 @@ def _wait(tag: str) -> None:
         fail(msg)
 
 
+def _publish_tag(
+    tag: str,
+    project: str | None,
+    version: str,
+    cwd: Path,
+    create_release: bool,
+    changes_dir: Path,
+    separator: str,
+) -> None:
+    if create_release:
+        target = _git_head_sha(cwd)
+        notes_file = resolve_notes_file(project, version, cwd / changes_dir, separator)
+        if notes_file.is_file():
+            _gh_release_create(tag, tag, notes_file, generate_notes=False, cwd=cwd, target=target)
+        else:
+            _gh_release_create(tag, tag, None, generate_notes=True, cwd=cwd, target=target)
+    else:
+        _git_push_tag(tag, cwd)
+
+
 def cmd_tag() -> None:
     cwd = Path(os.environ.get("WORKING_DIRECTORY", "."))
     projects = os.environ.get("PROJECTS", "").strip()
     prefix = os.environ.get("PREFIX", "")
+    create_release = os.environ.get("CREATE_RELEASE", "false").lower() == "true"
+    changes_dir = Path(os.environ.get("CHANGES_DIR") or ".changes")
+    separator = os.environ.get("SEPARATOR", "-")
 
     if projects:
         project_list = _split_csv(projects)
         all_versions: list[str] = []
         all_tags: list[str] = []
-        created: list[str] = []
+        created: list[tuple[str, str, str]] = []
 
         for project in project_list:
             version = _changie_latest(project, cwd)
@@ -300,19 +342,27 @@ def cmd_tag() -> None:
                 fail(str(e))
 
             _git_create_tag(tag, cwd)
-            created.append(tag)
+            created.append((project, version, tag))
             print(f"Created tag: {tag}")
 
         if created:
-            for t in created:
-                _git_push_tag(t, cwd)
-                _wait(t)
+            for project, version, tag in created:
+                _publish_tag(
+                    tag,
+                    project,
+                    version,
+                    cwd,
+                    create_release,
+                    changes_dir,
+                    separator,
+                )
+                _wait(tag)
         else:
             print("No new tags to push")
 
         write_output("version", ", ".join(all_versions))
         write_output("tag", ", ".join(all_tags))
-        write_output("created-tags", " ".join(created))
+        write_output("created-tags", " ".join(tag for _, _, tag in created))
         return
 
     # Single-project mode
@@ -334,7 +384,7 @@ def cmd_tag() -> None:
         fail(str(e))
 
     _git_create_tag(tag, cwd)
-    _git_push_tag(tag, cwd)
+    _publish_tag(tag, None, version, cwd, create_release, changes_dir, separator)
     write_output("created-tags", tag)
     _wait(tag)
 

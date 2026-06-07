@@ -5,6 +5,7 @@ Run:
 """
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -290,6 +291,95 @@ class FakeGit:
         self.pushed.append(tag)
 
 
+class TestGitHelpers:
+    def test_git_head_sha_returns_stdout(self, monkeypatch):
+        monkeypatch.setattr(
+            changie_auto_tag,
+            "_run",
+            lambda cmd, cwd: subprocess.CompletedProcess(cmd, 0, stdout="abc123\n", stderr=""),
+        )
+
+        assert changie_auto_tag._git_head_sha(Path(".")) == "abc123"
+
+    def test_git_head_sha_raises_on_failure(self, monkeypatch):
+        monkeypatch.setattr(
+            changie_auto_tag,
+            "_run",
+            lambda cmd, cwd: subprocess.CompletedProcess(cmd, 1, stdout="", stderr="bad ref\n"),
+        )
+
+        with pytest.raises(RuntimeError, match="git rev-parse HEAD failed: bad ref"):
+            changie_auto_tag._git_head_sha(Path("."))
+
+
+class TestGhReleaseHelpers:
+    def test_release_exists_true(self, monkeypatch):
+        monkeypatch.setattr(
+            changie_auto_tag,
+            "_run",
+            lambda cmd, cwd: subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""),
+        )
+
+        assert changie_auto_tag._gh_release_exists("v1.0.0", Path(".")) is True
+
+    def test_release_exists_false(self, monkeypatch):
+        monkeypatch.setattr(
+            changie_auto_tag,
+            "_run",
+            lambda cmd, cwd: subprocess.CompletedProcess(cmd, 1, stdout="", stderr="not found"),
+        )
+
+        assert changie_auto_tag._gh_release_exists("v1.0.0", Path(".")) is False
+
+    def test_release_create_skips_when_release_exists(self, monkeypatch, capsys):
+        monkeypatch.setattr(changie_auto_tag, "_gh_release_exists", lambda tag, cwd: True)
+        monkeypatch.setattr(
+            changie_auto_tag,
+            "_run",
+            lambda cmd, cwd: pytest.fail("gh release create should not run"),
+        )
+
+        changie_auto_tag._gh_release_create(
+            "v1.0.0", "v1.0.0", None, generate_notes=True, cwd=Path(".")
+        )
+
+        assert "Release v1.0.0 already exists" in capsys.readouterr().out
+
+    def test_release_create_includes_target(self, monkeypatch):
+        monkeypatch.setattr(changie_auto_tag, "_gh_release_exists", lambda tag, cwd: False)
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, cwd):
+            calls.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        monkeypatch.setattr(changie_auto_tag, "_run", fake_run)
+
+        changie_auto_tag._gh_release_create(
+            "v1.0.0",
+            "v1.0.0",
+            Path("notes.md"),
+            generate_notes=False,
+            cwd=Path("."),
+            target="abc123",
+        )
+
+        assert calls == [
+            [
+                "gh",
+                "release",
+                "create",
+                "v1.0.0",
+                "--title",
+                "v1.0.0",
+                "--target",
+                "abc123",
+                "--notes-file",
+                "notes.md",
+            ]
+        ]
+
+
 class TestCmdTag:
     def test_single_project_happy_path(self, tmp_path, monkeypatch):
         outputs = tmp_path / "outputs"
@@ -367,6 +457,141 @@ class TestCmdTag:
         assert result["created-tags"] == "a-v1.0.0"
         assert fake_git.created == ["a-v1.0.0"]
         assert fake_git.pushed == ["a-v1.0.0"]
+
+    def test_single_project_create_release_publishes_via_release(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".changes").mkdir()
+        (tmp_path / ".changes" / "v1.0.0.md").write_text("notes\n")
+        outputs = tmp_path / "outputs"
+        monkeypatch.setenv("GITHUB_OUTPUT", str(outputs))
+        monkeypatch.setenv("PROJECTS", "")
+        monkeypatch.setenv("PREFIX", "")
+        monkeypatch.setenv("CREATE_RELEASE", "true")
+        monkeypatch.setenv("CHANGES_DIR", ".changes")
+        monkeypatch.setenv("SEPARATOR", "-")
+        monkeypatch.setenv("WAIT_FOR_PUBLISH", "false")
+        monkeypatch.setenv("WORKING_DIRECTORY", ".")
+
+        fake_git = FakeGit()
+        events: list[tuple] = []
+        monkeypatch.setattr(changie_auto_tag, "_git_tag_exists_local", fake_git.tag_exists_local)
+        monkeypatch.setattr(changie_auto_tag, "_git_tag_exists_remote", fake_git.tag_exists_remote)
+        monkeypatch.setattr(changie_auto_tag, "_git_create_tag", fake_git.create_tag)
+        monkeypatch.setattr(
+            changie_auto_tag,
+            "_git_push_tag",
+            lambda tag, cwd: pytest.fail("_git_push_tag should not run"),
+        )
+        monkeypatch.setattr(changie_auto_tag, "_git_head_sha", lambda cwd: "abc123")
+        monkeypatch.setattr(changie_auto_tag, "_changie_latest", lambda project, cwd: "v1.0.0")
+        monkeypatch.setattr(
+            changie_auto_tag,
+            "_gh_release_create",
+            lambda tag, title, notes_file, generate_notes, cwd, target=None: events.append(
+                ("release", tag, str(notes_file) if notes_file else None, generate_notes, target)
+            ),
+        )
+        monkeypatch.setattr(
+            changie_auto_tag, "_wait", lambda tag: events.append(("wait", tag))
+        )
+
+        cmd_tag()
+
+        result = _read_outputs(outputs)
+        assert result["created-tags"] == "v1.0.0"
+        assert fake_git.created == ["v1.0.0"]
+        assert fake_git.pushed == []
+        assert events == [
+            ("release", "v1.0.0", ".changes/v1.0.0.md", False, "abc123"),
+            ("wait", "v1.0.0"),
+        ]
+
+    def test_single_project_without_create_release_pushes_tag(
+        self, tmp_path, monkeypatch
+    ):
+        outputs = tmp_path / "outputs"
+        monkeypatch.setenv("GITHUB_OUTPUT", str(outputs))
+        monkeypatch.setenv("PROJECTS", "")
+        monkeypatch.setenv("PREFIX", "")
+        monkeypatch.delenv("CREATE_RELEASE", raising=False)
+        monkeypatch.setenv("WAIT_FOR_PUBLISH", "false")
+        monkeypatch.setenv("WORKING_DIRECTORY", ".")
+
+        fake_git = FakeGit()
+        monkeypatch.setattr(changie_auto_tag, "_git_tag_exists_local", fake_git.tag_exists_local)
+        monkeypatch.setattr(changie_auto_tag, "_git_tag_exists_remote", fake_git.tag_exists_remote)
+        monkeypatch.setattr(changie_auto_tag, "_git_create_tag", fake_git.create_tag)
+        monkeypatch.setattr(changie_auto_tag, "_git_push_tag", fake_git.push_tag)
+        monkeypatch.setattr(changie_auto_tag, "_changie_latest", lambda project, cwd: "v1.0.0")
+        monkeypatch.setattr(
+            changie_auto_tag,
+            "_gh_release_create",
+            lambda *args, **kwargs: pytest.fail("_gh_release_create should not run"),
+        )
+
+        cmd_tag()
+
+        result = _read_outputs(outputs)
+        assert result["created-tags"] == "v1.0.0"
+        assert fake_git.created == ["v1.0.0"]
+        assert fake_git.pushed == ["v1.0.0"]
+
+    def test_multi_project_create_release_uses_project_notes(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".changes" / "a").mkdir(parents=True)
+        (tmp_path / ".changes" / "a" / "v1.0.0.md").write_text("a-notes\n")
+        outputs = tmp_path / "outputs"
+        monkeypatch.setenv("GITHUB_OUTPUT", str(outputs))
+        monkeypatch.setenv("PROJECTS", "a,b")
+        monkeypatch.setenv("PREFIX", "")
+        monkeypatch.setenv("CREATE_RELEASE", "true")
+        monkeypatch.setenv("CHANGES_DIR", ".changes")
+        monkeypatch.setenv("SEPARATOR", "-")
+        monkeypatch.setenv("WAIT_FOR_PUBLISH", "false")
+        monkeypatch.setenv("WORKING_DIRECTORY", ".")
+
+        fake_git = FakeGit()
+        versions = {"a": "a-v1.0.0", "b": "b-v2.0.0"}
+        release_calls: list[tuple] = []
+        monkeypatch.setattr(changie_auto_tag, "_git_tag_exists_local", fake_git.tag_exists_local)
+        monkeypatch.setattr(changie_auto_tag, "_git_tag_exists_remote", fake_git.tag_exists_remote)
+        monkeypatch.setattr(changie_auto_tag, "_git_create_tag", fake_git.create_tag)
+        monkeypatch.setattr(
+            changie_auto_tag,
+            "_git_push_tag",
+            lambda tag, cwd: pytest.fail("_git_push_tag should not run"),
+        )
+        monkeypatch.setattr(changie_auto_tag, "_git_head_sha", lambda cwd: "abc123")
+        monkeypatch.setattr(
+            changie_auto_tag, "_changie_latest", lambda project, cwd: versions[project]
+        )
+        monkeypatch.setattr(
+            changie_auto_tag,
+            "_gh_release_create",
+            lambda tag, title, notes_file, generate_notes, cwd, target=None: release_calls.append(
+                (tag, str(notes_file) if notes_file else None, generate_notes, target)
+            ),
+        )
+        waited: list[str] = []
+        monkeypatch.setattr(changie_auto_tag, "_wait", lambda tag: waited.append(tag))
+
+        cmd_tag()
+
+        result = _read_outputs(outputs)
+        assert result["version"] == "a-v1.0.0, b-v2.0.0"
+        assert result["tag"] == "a-v1.0.0, b-v2.0.0"
+        assert result["created-tags"] == "a-v1.0.0 b-v2.0.0"
+        assert fake_git.created == ["a-v1.0.0", "b-v2.0.0"]
+        assert fake_git.pushed == []
+        assert release_calls == [
+            ("a-v1.0.0", ".changes/a/v1.0.0.md", False, "abc123"),
+            ("b-v2.0.0", None, True, "abc123"),
+        ]
+        assert waited == ["a-v1.0.0", "b-v2.0.0"]
 
 
 # --- cmd_release ---

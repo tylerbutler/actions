@@ -80,6 +80,9 @@ runs:
       env:
         PREFIX: ${{ inputs.tag-prefix }}
         PROJECTS: ${{ inputs.projects }}
+        CREATE_RELEASE: ${{ inputs.create-release }}
+        CHANGES_DIR: ${{ steps.config.outputs.changes-dir }}
+        SEPARATOR: ${{ steps.config.outputs.separator }}
         GITHUB_TOKEN: ${{ inputs.token }}
         GH_TOKEN: ${{ inputs.token }}
         WAIT_FOR_PUBLISH: ${{ inputs.wait-for-publish }}
