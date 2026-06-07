@@ -496,6 +496,10 @@ Create a version tag from the latest [changie](https://changie.dev/) release. De
 | `tag` | Full tag(s) that were created |
 | `created-tags` | Space-separated list of tags actually created |
 
+**Release ownership when `create-release` is `true`:**
+
+`changie-auto-tag` is the sole owner and guaranteed creator of the GitHub Release. It creates the Release as the tag is published, before downstream tag-triggered workflows run, and re-runs skip an existing Release without duplicating or changing it. Publish workflows should only upload assets to the existing Release (for example, `gh release upload <tag> ...`), not call `gh release create`; standalone workflows that may run without this action should use an idempotent guard such as `gh release view <tag> || gh release create <tag> ...`. This ordering also lets `wait-for-publish: true` compose with `create-release: true`.
+
 **Example (auto-tag on release PR merge):**
 
 ```yaml
@@ -925,6 +929,8 @@ jobs:
 ```
 
 For monorepos where each tag triggers a package publish workflow, set `wait-for-publish: true` on the reusable `auto-tag.yml` workflow. This makes auto-tag push one tag, wait for the configured publish workflow to succeed for that tag, and only then push the next tag. This preserves dependency order for packages that must be published to a registry before dependents can resolve them.
+
+When `create-release: true` is also set, the wrapped `changie-auto-tag` action creates the GitHub Release before the publish workflow runs. Publish workflows should upload assets to that existing Release instead of creating it themselves.
 
 **Example (workspace auto-tag with ordered package publishing):**
 
