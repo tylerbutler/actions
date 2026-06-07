@@ -9,10 +9,6 @@ inputs:
     description: 'Whether to set up Erlang/OTP before installing licence_audit'
     required: false
     default: 'true'
-  otp-version:
-    description: 'Erlang/OTP version to install when setup-beam is true'
-    required: false
-    default: '28'
 
 runs:
   using: composite
@@ -21,7 +17,7 @@ runs:
       if: inputs.setup-beam == 'true'
       uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # ratchet:erlef/setup-beam@v1
       with:
-        otp-version: ${{ inputs.otp-version }}
+        otp-version: '28'
 
     - name: Install licence_audit
       shell: bash

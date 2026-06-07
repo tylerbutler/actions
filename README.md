@@ -33,8 +33,7 @@ Install the released `licence_audit` escript and optionally set up Erlang/OTP.
 | Input | Default | Description |
 |-------|---------|-------------|
 | `version` | Required | `licence_audit` GitHub Release tag to install. |
-| `setup-beam` | `true` | Set up Erlang/OTP before installing `licence_audit`. |
-| `otp-version` | `28` | Erlang/OTP version to install when `setup-beam` is `true`. |
+| `setup-beam` | `true` | Set up Erlang/OTP 28 before installing `licence_audit`. |
 
 **Example (default Beam setup):**
 
