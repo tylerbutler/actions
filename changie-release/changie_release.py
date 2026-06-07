@@ -4,7 +4,7 @@
 Implements the bash steps that were too fragile to keep in sed/grep/awk:
 
     check-config        Read .changie.yaml and detect unreleased fragments.
-    bump-files          Rewrite top-level TOML keys with the released version.
+    bump-files          Rewrite TOML key paths with the released version.
     read-changelog      Build the changelog body (multi-project aggregation).
     resolve-templates   Apply {version}/{changelog} substitutions to PR templates.
 
@@ -28,7 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "_common"))
 
-from gha import append_summary, fail, parse_colon_entries, update_toml_top_level_key, write_output  # noqa: E402
+from gha import append_summary, fail, parse_colon_entries, update_toml_file_key, write_output  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -75,11 +75,11 @@ def strip_version_prefix(version: str, project: str = "", separator: str = "") -
 def parse_version_files(text: str, multi_project: bool) -> list[dict[str, str | None]]:
     """Parse the `version-files` input.
 
-    Single-project format: `path:key` per line.
-    Multi-project format:  `project:path:key` per line.
+    Single-project format: `path:key-path` per line.
+    Multi-project format:  `project:path:key-path` per line.
     """
     expected = 3 if multi_project else 2
-    label = "project:path:key" if multi_project else "path:key"
+    label = "project:path:key-path" if multi_project else "path:key-path"
     try:
         raw_entries = parse_colon_entries(text, fields=expected)
     except ValueError as e:
@@ -208,7 +208,7 @@ def cmd_resolve_versions() -> None:
 
 
 def cmd_bump_files() -> None:
-    """Rewrite TOML version keys for each batched project (or for single-project mode)."""
+    """Rewrite TOML version key paths for each batched project (or single-project mode)."""
     projects = os.environ.get("PROJECTS", "").strip()
     version_files_text = os.environ.get("VERSION_FILES", "")
     if not version_files_text.strip():
@@ -251,12 +251,9 @@ def _apply_bump(path: Path, key: str, value: str) -> None:
     if not path.is_file():
         fail(f"Version file not found: {path}")
     try:
-        content = path.read_text(encoding="utf-8")
-        new_content = update_toml_top_level_key(content, key, value)
-    except (KeyError, TypeError, ValueError, tomllib.TOMLDecodeError) as e:
+        update_toml_file_key(path, key, value)
+    except (KeyError, TypeError, ValueError, RuntimeError, tomllib.TOMLDecodeError) as e:
         fail(f"Failed to update {path}: {e}")
-    if new_content != content:
-        path.write_text(new_content, encoding="utf-8")
     print(f'Updated {path}: {key} = "{value}"')
 
 

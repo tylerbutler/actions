@@ -23,8 +23,8 @@ These are real incidents encoded in `CLAUDE.md`. Flag any new code that reintrod
 - `changie-auto-tag` `create-release` should source release notes from `.changes/{version}.md` (or `.changes/{project}/{version}.md` in multi-project mode) and fall back to `--generate-notes`.
 
 ### Version files
-- `changie-release`'s `version-files` input only supports TOML and only top-level keys. Flag any code that claims YAML/JSON support or nested-key support.
-- Single-project format is `path:key`. Multi-project format is `project:path:key`. The two cannot be mixed.
+- `changie-release`'s `version-files` input only supports TOML key paths. Flag any code that claims YAML/JSON support.
+- Single-project format is `path:key-path`. Multi-project format is `project:path:key-path`. The two cannot be mixed.
 
 ### Gleam publish
 - `gleam-publish`'s `replace-path-deps` must rewrite `{ path = "..." }` deps to Hex version ranges before publishing. The range format is `">= X.Y.Z and < (X+1).0.0"` for ≥1.0, and `< 0.(Y+1).0` for pre-1.0.

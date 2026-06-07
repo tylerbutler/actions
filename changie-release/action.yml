@@ -68,13 +68,15 @@ inputs:
   version-files:
     description: |
       Newline-separated list of TOML files to update with the release version.
-      Only top-level TOML keys are supported. Version is written without the `v` prefix.
+      TOML dotted key paths are supported. Version is written without the `v` prefix.
 
-      Single-project format (one colon): `path:key`
+      Single-project format (one colon): `path:key-path`
         Example: `gleam.toml:version`
+        Example: `Cargo.toml:package.version`
 
-      Multi-project format (two colons): `project:path:key`
+      Multi-project format (two colons): `project:path:key-path`
         Example: `vestibule:gleam.toml:version`
+        Example: `core:Cargo.toml:package.version`
         Only projects that were actually batched will have their version files updated.
     required: false
     default: ''
@@ -198,6 +200,13 @@ runs:
           echo "Releasing: $VERSION"
           echo "proceed=true" >> "$GITHUB_OUTPUT"
         fi
+
+    - name: Install toml-cli
+      if: steps.config.outputs.skipped != 'true' && steps.verify.outputs.proceed == 'true' && inputs.version-files != ''
+      shell: bash
+      run: |
+        python3 -m pip install --user 'toml-cli==0.8.2'
+        echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
 
     - name: Bump version files
       if: steps.config.outputs.skipped != 'true' && steps.verify.outputs.proceed == 'true' && inputs.version-files != ''

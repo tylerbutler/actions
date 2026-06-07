@@ -12,11 +12,11 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+import update_version_files  # noqa: E402
 from update_version_files import (  # noqa: E402
     find_ancestor_package_json,
     main,
     parse_entries,
-    update_toml_top_level_key,
 )
 
 
@@ -36,7 +36,7 @@ class TestParseEntries:
         assert parse_entries(text) == [("a.toml", "version"), ("b.toml", "name")]
 
     def test_rejects_missing_colon(self):
-        with pytest.raises(ValueError, match="expected 'path:key'"):
+        with pytest.raises(ValueError, match="expected 'path:key-path'"):
             parse_entries("nocolon")
 
     def test_rejects_empty_path(self):
@@ -46,67 +46,6 @@ class TestParseEntries:
     def test_rejects_empty_key(self):
         with pytest.raises(ValueError):
             parse_entries("foo.toml:")
-
-
-class TestUpdateTomlTopLevelKey:
-    def test_simple_replace(self):
-        content = 'version = "1.0.0"\n'
-        result = update_toml_top_level_key(content, "version", "2.0.0")
-        assert result == 'version = "2.0.0"\n'
-
-    def test_preserves_surrounding_lines(self):
-        content = 'name = "foo"\nversion = "1.0.0"\nlicenses = ["MIT"]\n'
-        result = update_toml_top_level_key(content, "version", "1.2.3")
-        assert result == 'name = "foo"\nversion = "1.2.3"\nlicenses = ["MIT"]\n'
-
-    def test_preserves_trailing_comment(self):
-        content = '# package metadata\nversion = "1.0.0"  # current\n'
-        result = update_toml_top_level_key(content, "version", "2.0.0")
-        assert result == '# package metadata\nversion = "2.0.0"  # current\n'
-
-    def test_ignores_same_named_key_in_table(self):
-        # The bash sed implementation would also catch this since sed anchors
-        # at ^, but a table whose lines aren't indented would still bite it.
-        # Either way, restrict to before the first section header.
-        content = (
-            'version = "0.1.0"\n'
-            "\n"
-            "[tool.poetry]\n"
-            'name = "x"\n'
-            'version = "9.9.9"\n'
-        )
-        result = update_toml_top_level_key(content, "version", "0.2.0")
-        assert result == (
-            'version = "0.2.0"\n'
-            "\n"
-            "[tool.poetry]\n"
-            'name = "x"\n'
-            'version = "9.9.9"\n'
-        )
-
-    def test_missing_key_raises(self):
-        with pytest.raises(KeyError):
-            update_toml_top_level_key('name = "foo"\n', "version", "1.0.0")
-
-    def test_key_only_inside_table_raises(self):
-        content = '[package]\nversion = "1.0.0"\n'
-        with pytest.raises(KeyError):
-            update_toml_top_level_key(content, "version", "2.0.0")
-
-    def test_non_string_value_raises(self):
-        with pytest.raises(TypeError):
-            update_toml_top_level_key("version = 1\n", "version", "2.0.0")
-
-    def test_key_with_hyphen_and_underscore(self):
-        content = 'my_pkg-version = "1.0.0"\n'
-        result = update_toml_top_level_key(content, "my_pkg-version", "2.0.0")
-        assert result == 'my_pkg-version = "2.0.0"\n'
-
-    def test_invalid_toml_raises(self):
-        import tomllib
-
-        with pytest.raises(tomllib.TOMLDecodeError):
-            update_toml_top_level_key("not valid = = toml\n", "version", "1.0.0")
 
 
 class TestFindAncestorPackageJson:
@@ -151,10 +90,33 @@ class TestMainIntegration:
         cargo = pkg_dir / "Cargo.toml"
         cargo.write_text('name = "core"\nversion = "0.0.0"\n')
 
+        def fake_update(path: Path, key: str, value: str) -> None:
+            assert key == "version"
+            path.write_text('name = "core"\nversion = "3.4.5"\n')
+
+        monkeypatch.setattr(update_version_files, "update_toml_file_key", fake_update)
         monkeypatch.setenv("VERSION_FILES", "packages/core/Cargo.toml:version")
         main()
 
         assert cargo.read_text() == 'name = "core"\nversion = "3.4.5"\n'
+
+    def test_end_to_end_updates_nested_file(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "package.json").write_text(json.dumps({"version": "3.4.5"}))
+        cargo = tmp_path / "Cargo.toml"
+        cargo.write_text('[package]\nversion = "0.0.0"\n')
+        calls: list[tuple[Path, str, str]] = []
+
+        def fake_update(path: Path, key: str, value: str) -> None:
+            calls.append((path, key, value))
+            path.write_text('[package]\nversion = "3.4.5"\n')
+
+        monkeypatch.setattr(update_version_files, "update_toml_file_key", fake_update)
+        monkeypatch.setenv("VERSION_FILES", "Cargo.toml:package.version")
+        main()
+
+        assert calls == [(Path("Cargo.toml"), "package.version", "3.4.5")]
+        assert cargo.read_text() == '[package]\nversion = "3.4.5"\n'
 
     def test_multiple_entries(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
@@ -165,6 +127,10 @@ class TestMainIntegration:
         a.write_text('version = "0.0.0"\n')
         b.write_text('version = "0.0.0"\n')
 
+        def fake_update(path: Path, key: str, value: str) -> None:
+            path.write_text(f'{key} = "{value}"\n')
+
+        monkeypatch.setattr(update_version_files, "update_toml_file_key", fake_update)
         monkeypatch.setenv("VERSION_FILES", "a.toml:version\nb.toml:version")
         main()
 

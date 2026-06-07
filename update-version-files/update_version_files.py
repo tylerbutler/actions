@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
-"""Update top-level TOML version keys from the nearest ancestor package.json.
+"""Update TOML version key paths from the nearest ancestor package.json.
 
-Replaces the bash/sed implementation: more robust (won't blindly rewrite
-same-named keys inside `[tables]`) and unit-testable.
+Uses toml-cli for TOML mutation while validating requested key paths first, so
+missing keys fail instead of being created implicitly.
 
 Input is read from the `VERSION_FILES` environment variable: newline-separated
-`path:key` entries. For each entry, the script walks up from the TOML file's
-directory to find the nearest `package.json`, reads its `version` field, and
-rewrites the top-level `key = "..."` assignment in the TOML file.
-
-Only top-level string keys are updated. If the requested key only appears
-inside a `[table]`, the action errors out rather than rewriting the wrong line.
+`path:key-path` entries. For each entry, the script walks up from the TOML
+file's directory to find the nearest `package.json`, reads its `version` field,
+and rewrites the existing string TOML key path.
 """
 
 from __future__ import annotations
@@ -23,15 +20,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "_common"))
 
-from gha import append_summary, fail, parse_colon_entries, update_toml_top_level_key  # noqa: E402
+from gha import append_summary, fail, parse_colon_entries, update_toml_file_key  # noqa: E402
 
 
 def parse_entries(text: str) -> list[tuple[str, str]]:
-    """Parse newline-separated `path:key` entries, ignoring blank lines."""
+    """Parse newline-separated `path:key-path` entries, ignoring blank lines."""
     try:
         raw_entries = parse_colon_entries(text, fields=2)
     except ValueError as e:
-        raise ValueError(f"Invalid entry: expected 'path:key' ({e})") from e
+        raise ValueError(f"Invalid entry: expected 'path:key-path' ({e})") from e
     entries: list[tuple[str, str]] = []
     for path, key in raw_entries:
         if not path or not key:
@@ -80,19 +77,17 @@ def main() -> None:
             return
 
         try:
-            content = toml_path.read_text(encoding="utf-8")
-            new_content = update_toml_top_level_key(content, key, version)
+            update_toml_file_key(toml_path, key, version)
         except (
             KeyError,
             TypeError,
             ValueError,
+            RuntimeError,
             tomllib.TOMLDecodeError,
         ) as e:
             fail(f"Failed to update {path_str}: {e}")
             return
 
-        if new_content != content:
-            toml_path.write_text(new_content, encoding="utf-8")
         print(f'Updated {path_str}: {key} = "{version}" (from {pkg_json})')
 
     append_summary("## Update Version Files")
