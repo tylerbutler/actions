@@ -134,7 +134,12 @@ def cmd_detect_fragments() -> None:
     unreleased_path = f"{config['changesDir']}/{config['unreleasedDir']}"
     write_output("unreleased-path", unreleased_path)
 
-    fragments = _git_diff_added(base, head, f"{unreleased_path}/*.yaml", cwd)
+    # Match any added file in the unreleased dir regardless of extension —
+    # changie writes fragments using the configured versionExt (e.g. .yaml,
+    # .md), so a hardcoded extension misses repos that don't use .yaml.
+    # Dotfiles like .gitkeep are ignored.
+    added = _git_diff_added(base, head, unreleased_path, cwd)
+    fragments = [f for f in added if not Path(f).name.startswith(".")]
     if fragments:
         print(f"Found {len(fragments)} changie fragment(s) added in this PR")
         write_output("has-entries", "true")
@@ -155,9 +160,12 @@ def cmd_render_preview() -> None:
     unreleased_dir = cwd / unreleased_path
 
     # Strip non-PR fragments so changie's dry-run renders only PR additions.
-    # The checkout is disposable.
+    # The checkout is disposable. We only touch regular, non-dotfile files so
+    # any fragment extension is handled while .gitkeep is preserved.
     if unreleased_dir.is_dir():
-        for path in unreleased_dir.glob("*.yaml"):
+        for path in unreleased_dir.glob("*"):
+            if not path.is_file() or path.name.startswith("."):
+                continue
             rel = str(path.relative_to(cwd))
             if rel not in pr_fragments:
                 path.unlink()

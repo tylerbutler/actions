@@ -166,7 +166,8 @@ class TestCmdDetectFragments:
             captured_glob.append(glob)
             return [
                 ".changes/unreleased/Added-1.yaml",
-                ".changes/unreleased/Fixed-2.yaml",
+                ".changes/unreleased/Fixed-2.md",
+                ".changes/unreleased/.gitkeep",
             ]
 
         monkeypatch.setattr(changie_check, "_git_diff_added", fake_diff)
@@ -174,10 +175,31 @@ class TestCmdDetectFragments:
 
         result = _read_outputs(outputs)
         assert result["has-entries"] == "true"
-        assert captured_glob == [".changes/unreleased/*.yaml"]
+        # The unreleased dir itself is the pathspec so any extension matches.
+        assert captured_glob == [".changes/unreleased"]
         assert "Added-1.yaml" in result["fragments"]
-        assert "Fixed-2.yaml" in result["fragments"]
+        # Non-.yaml fragments (e.g. versionExt: md) are detected too.
+        assert "Fixed-2.md" in result["fragments"]
+        # Dotfiles like .gitkeep are not counted as fragments.
+        assert ".gitkeep" not in result["fragments"]
         assert result["unreleased-path"] == ".changes/unreleased"
+
+    def test_only_gitkeep_added_is_not_a_fragment(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        outputs = tmp_path / "outputs"
+        monkeypatch.setenv("GITHUB_OUTPUT", str(outputs))
+        monkeypatch.setenv("BASE_SHA", "base")
+        monkeypatch.setenv("HEAD_SHA", "head")
+        monkeypatch.setenv("WORKING_DIRECTORY", ".")
+        monkeypatch.setattr(
+            changie_check,
+            "_git_diff_added",
+            lambda base, head, glob, cwd: [".changes/unreleased/.gitkeep"],
+        )
+        cmd_detect_fragments()
+        result = _read_outputs(outputs)
+        assert result["has-entries"] == "false"
+        assert result["fragments"] == ""
 
 
 # --- cmd_render_preview ---
@@ -190,7 +212,8 @@ class TestCmdRenderPreview:
         unreleased.mkdir(parents=True)
         (unreleased / "pr-added.yaml").write_text("kind: Added\n")
         (unreleased / "from-main.yaml").write_text("kind: Added\n")
-        (unreleased / ".gitkeep").touch()  # non-yaml, should be left alone
+        (unreleased / "from-main.md").write_text("kind: Added\n")
+        (unreleased / ".gitkeep").touch()  # dotfile, should be left alone
 
         outputs = tmp_path / "outputs"
         monkeypatch.setenv("GITHUB_OUTPUT", str(outputs))
@@ -211,6 +234,7 @@ class TestCmdRenderPreview:
         # Non-PR fragment removed, PR fragment preserved, .gitkeep untouched
         assert (unreleased / "pr-added.yaml").exists()
         assert not (unreleased / "from-main.yaml").exists()
+        assert not (unreleased / "from-main.md").exists()
         assert (unreleased / ".gitkeep").exists()
 
         result = _read_outputs(outputs)
