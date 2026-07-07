@@ -94,19 +94,19 @@ jobs:
           app-id: ${{ secrets.app-id }}
           private-key: ${{ secrets.app-private-key }}
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # ratchet:actions/checkout@v7
         with:
           token: ${{ steps.app-token.outputs.token || github.token }}
 
       - name: Read workspace
         if: inputs.workspace-file != ''
         id: workspace
-        uses: tylerbutler/actions/read-gleam-workspace@17116c2d3dfb57c2db7967fcecf0fc878e4cb6cf # ratchet:tylerbutler/actions/read-gleam-workspace@main
+        uses: tylerbutler/actions/read-gleam-workspace@c3de10f5c576265f4910698528d949179081f25b # ratchet:tylerbutler/actions/read-gleam-workspace@main
         with:
           working-directory: ${{ inputs.working-directory }}
           workspace-file: ${{ inputs.workspace-file }}
 
-      - uses: tylerbutler/actions/changie-auto-tag@17116c2d3dfb57c2db7967fcecf0fc878e4cb6cf # ratchet:tylerbutler/actions/changie-auto-tag@main
+      - uses: tylerbutler/actions/changie-auto-tag@c3de10f5c576265f4910698528d949179081f25b # ratchet:tylerbutler/actions/changie-auto-tag@main
         id: auto-tag
         with:
           changie-version: ${{ inputs.changie-version }}

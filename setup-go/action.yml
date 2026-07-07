@@ -36,20 +36,20 @@ runs:
   steps:
     - name: Install tools
       if: inputs.tools != ''
-      uses: taiki-e/install-action@213ccc1a076163c093f914550b94feb90fab916d # ratchet:taiki-e/install-action@v2
+      uses: taiki-e/install-action@50414676f9f5d50a65992c6dd2ed02641263226c # ratchet:taiki-e/install-action@v2
       with:
         tool: ${{ inputs.tools }}
 
     - name: Setup Go (from version file)
       if: inputs.go-version == ''
-      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # ratchet:actions/setup-go@v6
+      uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # ratchet:actions/setup-go@v6
       with:
         go-version-file: ${{ inputs.go-version-file }}
         cache: ${{ inputs.cache == 'true' }}
 
     - name: Setup Go (explicit version)
       if: inputs.go-version != ''
-      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # ratchet:actions/setup-go@v6
+      uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # ratchet:actions/setup-go@v6
       with:
         go-version: ${{ inputs.go-version }}
         cache: ${{ inputs.cache == 'true' }}
