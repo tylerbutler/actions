@@ -234,21 +234,21 @@ jobs:
     if: github.event_name == 'pull_request' && github.event.action != 'closed' && inputs.check-changelog
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # ratchet:actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Read workspace
         if: inputs.workspace-file != ''
         id: workspace
-        uses: tylerbutler/actions/read-gleam-workspace@17116c2d3dfb57c2db7967fcecf0fc878e4cb6cf # ratchet:tylerbutler/actions/read-gleam-workspace@main
+        uses: tylerbutler/actions/read-gleam-workspace@c3de10f5c576265f4910698528d949179081f25b # ratchet:tylerbutler/actions/read-gleam-workspace@main
         with:
           working-directory: ${{ inputs.working-directory }}
           workspace-file: ${{ inputs.workspace-file }}
 
       - name: Check changie entries
         id: check
-        uses: tylerbutler/actions/changie-check@17116c2d3dfb57c2db7967fcecf0fc878e4cb6cf # ratchet:tylerbutler/actions/changie-check@main
+        uses: tylerbutler/actions/changie-check@c3de10f5c576265f4910698528d949179081f25b # ratchet:tylerbutler/actions/changie-check@main
         with:
           changie-version: ${{ inputs.changie-version }}
           working-directory: ${{ inputs.working-directory }}
@@ -331,21 +331,21 @@ jobs:
           app-id: ${{ secrets.app-id }}
           private-key: ${{ secrets.app-private-key }}
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # ratchet:actions/checkout@v7
         with:
           token: ${{ steps.app-token.outputs.token || github.token }}
 
       - name: Read workspace
         if: inputs.workspace-file != ''
         id: workspace
-        uses: tylerbutler/actions/read-gleam-workspace@17116c2d3dfb57c2db7967fcecf0fc878e4cb6cf # ratchet:tylerbutler/actions/read-gleam-workspace@main
+        uses: tylerbutler/actions/read-gleam-workspace@c3de10f5c576265f4910698528d949179081f25b # ratchet:tylerbutler/actions/read-gleam-workspace@main
         with:
           working-directory: ${{ inputs.working-directory }}
           workspace-file: ${{ inputs.workspace-file }}
 
       - name: Create release pull request
         id: release-pr
-        uses: tylerbutler/actions/changie-release@17116c2d3dfb57c2db7967fcecf0fc878e4cb6cf # ratchet:tylerbutler/actions/changie-release@main
+        uses: tylerbutler/actions/changie-release@c3de10f5c576265f4910698528d949179081f25b # ratchet:tylerbutler/actions/changie-release@main
         with:
           version: ${{ inputs.version }}
           projects: ${{ steps.workspace.outputs.projects || inputs.projects }}
@@ -396,21 +396,21 @@ jobs:
           app-id: ${{ secrets.app-id }}
           private-key: ${{ secrets.app-private-key }}
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # ratchet:actions/checkout@v7
         with:
           token: ${{ steps.app-token.outputs.token || github.token }}
 
       - name: Read workspace
         if: inputs.workspace-file != ''
         id: workspace
-        uses: tylerbutler/actions/read-gleam-workspace@17116c2d3dfb57c2db7967fcecf0fc878e4cb6cf # ratchet:tylerbutler/actions/read-gleam-workspace@main
+        uses: tylerbutler/actions/read-gleam-workspace@c3de10f5c576265f4910698528d949179081f25b # ratchet:tylerbutler/actions/read-gleam-workspace@main
         with:
           working-directory: ${{ inputs.working-directory }}
           workspace-file: ${{ inputs.workspace-file }}
 
       - name: Auto-tag release
         id: auto-tag
-        uses: tylerbutler/actions/changie-auto-tag@17116c2d3dfb57c2db7967fcecf0fc878e4cb6cf # ratchet:tylerbutler/actions/changie-auto-tag@main
+        uses: tylerbutler/actions/changie-auto-tag@c3de10f5c576265f4910698528d949179081f25b # ratchet:tylerbutler/actions/changie-auto-tag@main
         with:
           changie-version: ${{ inputs.changie-version }}
           working-directory: ${{ inputs.working-directory }}
@@ -451,12 +451,12 @@ jobs:
           echo "::error::publish-to includes 'hex', but secret hex-api-key is missing"
           exit 1
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # ratchet:actions/checkout@v7
 
       - name: Read workspace
         if: inputs.workspace-file != ''
         id: workspace
-        uses: tylerbutler/actions/read-gleam-workspace@17116c2d3dfb57c2db7967fcecf0fc878e4cb6cf # ratchet:tylerbutler/actions/read-gleam-workspace@main
+        uses: tylerbutler/actions/read-gleam-workspace@c3de10f5c576265f4910698528d949179081f25b # ratchet:tylerbutler/actions/read-gleam-workspace@main
         with:
           working-directory: ${{ inputs.working-directory }}
           workspace-file: ${{ inputs.workspace-file }}
@@ -479,7 +479,7 @@ jobs:
 
       - name: Publish to Hex
         id: publish
-        uses: tylerbutler/actions/gleam-publish@17116c2d3dfb57c2db7967fcecf0fc878e4cb6cf # ratchet:tylerbutler/actions/gleam-publish@main
+        uses: tylerbutler/actions/gleam-publish@c3de10f5c576265f4910698528d949179081f25b # ratchet:tylerbutler/actions/gleam-publish@main
         with:
           packages: ${{ steps.packages.outputs.packages }}
           working-directory: ${{ inputs.working-directory }}
@@ -523,10 +523,10 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # ratchet:actions/checkout@v7
 
       - name: Publish Homebrew formula
-        uses: tylerbutler/actions/publish-homebrew-formula@17116c2d3dfb57c2db7967fcecf0fc878e4cb6cf # ratchet:tylerbutler/actions/publish-homebrew-formula@main
+        uses: tylerbutler/actions/publish-homebrew-formula@c3de10f5c576265f4910698528d949179081f25b # ratchet:tylerbutler/actions/publish-homebrew-formula@main
         with:
           app-id: ${{ secrets.homebrew-app-id }}
           private-key: ${{ secrets.homebrew-app-private-key }}

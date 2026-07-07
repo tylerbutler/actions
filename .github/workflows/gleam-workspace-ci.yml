@@ -120,11 +120,11 @@ jobs:
     outputs:
       packages-json: ${{ steps.workspace.outputs.packages-json }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # ratchet:actions/checkout@v7
 
       - name: Read workspace
         id: workspace
-        uses: tylerbutler/actions/read-gleam-workspace@17116c2d3dfb57c2db7967fcecf0fc878e4cb6cf # ratchet:tylerbutler/actions/read-gleam-workspace@main
+        uses: tylerbutler/actions/read-gleam-workspace@c3de10f5c576265f4910698528d949179081f25b # ratchet:tylerbutler/actions/read-gleam-workspace@main
         with:
           working-directory: ${{ inputs.working-directory }}
           workspace-file: ${{ inputs.workspace-file }}
@@ -138,11 +138,11 @@ jobs:
         package: ${{ fromJson(needs.discover.outputs.packages-json) }}
     name: ${{ matrix.package.name }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # ratchet:actions/checkout@v7
 
       - name: Cache Gleam dependencies
         if: inputs.cache
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # ratchet:actions/cache@v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # ratchet:actions/cache@v6
         with:
           path: |
             ${{ inputs.working-directory }}/${{ matrix.package.path }}/build/packages
@@ -153,7 +153,7 @@ jobs:
 
       - name: Cache Mix dependencies
         if: inputs.cache && inputs.elixir-version != ''
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # ratchet:actions/cache@v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # ratchet:actions/cache@v6
         with:
           path: |
             ${{ inputs.working-directory }}/${{ matrix.package.path }}/deps
@@ -163,7 +163,7 @@ jobs:
             mix-${{ runner.os }}-${{ matrix.package.name }}-${{ inputs.elixir-version }}-
 
       - name: Setup environment
-        uses: tylerbutler/actions/setup-gleam@17116c2d3dfb57c2db7967fcecf0fc878e4cb6cf # ratchet:tylerbutler/actions/setup-gleam@main
+        uses: tylerbutler/actions/setup-gleam@c3de10f5c576265f4910698528d949179081f25b # ratchet:tylerbutler/actions/setup-gleam@main
         with:
           erlang-version: ${{ inputs.erlang-version }}
           gleam-version: ${{ inputs.gleam-version }}
@@ -180,7 +180,7 @@ jobs:
 
       - name: Download dependencies
         if: inputs.run-deps
-        uses: tylerbutler/actions/run-gleam-workspace@17116c2d3dfb57c2db7967fcecf0fc878e4cb6cf # ratchet:tylerbutler/actions/run-gleam-workspace@main
+        uses: tylerbutler/actions/run-gleam-workspace@c3de10f5c576265f4910698528d949179081f25b # ratchet:tylerbutler/actions/run-gleam-workspace@main
         with:
           working-directory: ${{ inputs.working-directory }}
           packages: ${{ matrix.package.path }}
@@ -195,7 +195,7 @@ jobs:
 
       - name: Format check
         if: inputs.format-check
-        uses: tylerbutler/actions/run-gleam-workspace@17116c2d3dfb57c2db7967fcecf0fc878e4cb6cf # ratchet:tylerbutler/actions/run-gleam-workspace@main
+        uses: tylerbutler/actions/run-gleam-workspace@c3de10f5c576265f4910698528d949179081f25b # ratchet:tylerbutler/actions/run-gleam-workspace@main
         with:
           working-directory: ${{ inputs.working-directory }}
           packages: ${{ matrix.package.path }}
@@ -203,7 +203,7 @@ jobs:
 
       - name: Type check
         if: inputs.check
-        uses: tylerbutler/actions/run-gleam-workspace@17116c2d3dfb57c2db7967fcecf0fc878e4cb6cf # ratchet:tylerbutler/actions/run-gleam-workspace@main
+        uses: tylerbutler/actions/run-gleam-workspace@c3de10f5c576265f4910698528d949179081f25b # ratchet:tylerbutler/actions/run-gleam-workspace@main
         with:
           working-directory: ${{ inputs.working-directory }}
           packages: ${{ matrix.package.path }}
@@ -211,7 +211,7 @@ jobs:
 
       - name: Build (warnings as errors)
         if: inputs.build-strict
-        uses: tylerbutler/actions/run-gleam-workspace@17116c2d3dfb57c2db7967fcecf0fc878e4cb6cf # ratchet:tylerbutler/actions/run-gleam-workspace@main
+        uses: tylerbutler/actions/run-gleam-workspace@c3de10f5c576265f4910698528d949179081f25b # ratchet:tylerbutler/actions/run-gleam-workspace@main
         with:
           working-directory: ${{ inputs.working-directory }}
           packages: ${{ matrix.package.path }}
@@ -219,7 +219,7 @@ jobs:
 
       - name: Test
         if: inputs.test
-        uses: tylerbutler/actions/run-gleam-workspace@17116c2d3dfb57c2db7967fcecf0fc878e4cb6cf # ratchet:tylerbutler/actions/run-gleam-workspace@main
+        uses: tylerbutler/actions/run-gleam-workspace@c3de10f5c576265f4910698528d949179081f25b # ratchet:tylerbutler/actions/run-gleam-workspace@main
         with:
           working-directory: ${{ inputs.working-directory }}
           packages: ${{ matrix.package.path }}
@@ -227,7 +227,7 @@ jobs:
 
       - name: Test (JavaScript)
         if: inputs.test-js
-        uses: tylerbutler/actions/run-gleam-workspace@17116c2d3dfb57c2db7967fcecf0fc878e4cb6cf # ratchet:tylerbutler/actions/run-gleam-workspace@main
+        uses: tylerbutler/actions/run-gleam-workspace@c3de10f5c576265f4910698528d949179081f25b # ratchet:tylerbutler/actions/run-gleam-workspace@main
         with:
           working-directory: ${{ inputs.working-directory }}
           packages: ${{ matrix.package.path }}
@@ -235,7 +235,7 @@ jobs:
 
       - name: Docs
         if: inputs.docs
-        uses: tylerbutler/actions/run-gleam-workspace@17116c2d3dfb57c2db7967fcecf0fc878e4cb6cf # ratchet:tylerbutler/actions/run-gleam-workspace@main
+        uses: tylerbutler/actions/run-gleam-workspace@c3de10f5c576265f4910698528d949179081f25b # ratchet:tylerbutler/actions/run-gleam-workspace@main
         with:
           working-directory: ${{ inputs.working-directory }}
           packages: ${{ matrix.package.path }}
@@ -243,7 +243,7 @@ jobs:
 
       - name: "${{ inputs.custom-command }}"
         if: inputs.custom-command != ''
-        uses: tylerbutler/actions/run-gleam-workspace@17116c2d3dfb57c2db7967fcecf0fc878e4cb6cf # ratchet:tylerbutler/actions/run-gleam-workspace@main
+        uses: tylerbutler/actions/run-gleam-workspace@c3de10f5c576265f4910698528d949179081f25b # ratchet:tylerbutler/actions/run-gleam-workspace@main
         with:
           working-directory: ${{ inputs.working-directory }}
           packages: ${{ matrix.package.path }}
