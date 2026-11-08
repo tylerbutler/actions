@@ -78,6 +78,10 @@ def api():
 
         def do_POST(self):
             payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            if self.path == "/publish":
+                versions.setdefault(payload["name"], []).append(payload["version"])
+                self.respond(201, {})
+                return
             requests.append(payload)
             releases[payload["tag_name"]] = payload
             self.respond(201, payload)

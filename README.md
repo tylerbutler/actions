@@ -163,6 +163,33 @@ invalid fragments fail under all policies. The action never runs doctor fixes
 and works on ordinary fork PRs with Contents read-only. A sticky comment is an
 optional caller step that needs its own Pull requests write permission.
 
+### trellis-publish
+
+Publish with installed trellis and caller-provided Gleam/runtime tools.
+Inputs: `working_directory` (`.`), exactly one of `package`, `tag`, or
+`all_untagged` (`false`), `dry_run` (`false`), and `hex_api_key` for real
+publication or authenticated queries. The key is scoped to this step.
+The summary reports the CLI outcome; there are no log-derived per-package outputs.
+
+```yaml
+- uses: tylerbutler/actions/trellis-publish@main
+  with:
+    all_untagged: 'true'
+    hex_api_key: ${{ secrets.HEXPM_API_KEY }}
+```
+
+Trellis owns dependency order, already-published checks, lifecycle selection,
+path-dependency requirements, source bundles, build/test validation, retry policy,
+and manifest restoration. Named Git-only/workspace packages fail; all-untagged
+publishes only Hex lifecycle members. Retry at the same approved release SHA
+after partial failure.
+
+`tag` must name an immutable exact package tag, with the matching manifest
+version and approved commit checked out. Moving series and repository tags are
+not publish selectors. Dry-run still queries Hex and prepares rewrites/bundles;
+it does not build/test the combined package or publish it. Callers own commit
+approval, serialization, and tagging.
+
 ### setup-licence-audit
 
 Install the released `licence_audit` escript and optionally set up Erlang/OTP.
