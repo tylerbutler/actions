@@ -82,12 +82,14 @@ printf '%s\\n' "$PWD" > "$TEST_CWD"
 printf '%s\\n' "\${HEXPM_API_KEY-unset}" > "$TEST_KEY"
 exit "$TEST_EXIT"
 `, {mode: 0o700});
-    for (const [name, args, title] of [
-      ["Publish Hex members", ["publish", "--all-untagged"], "Trellis publish"],
-      ["Tag approved release", ["tag", "create", "--push", "--github-release"], "Trellis tag"],
+    for (const [name, args] of [
+      ["Publish Hex members", ["publish", "--all-untagged"]],
+      ["Tag approved release", ["tag", "create", "--push", "--github-release"]],
     ]) {
-      const script = step(name).split("        run: |\n")[1]
-        .split("\n").map(line => line.replace(/^          /, "")).join("\n");
+      const source = step(name);
+      const script = source.includes("        run: |\n")
+        ? source.split("        run: |\n")[1].split("\n").map(line => line.replace(/^          /, "")).join("\n")
+        : source.match(/        run: (.+)/)[1];
       assert(!script.includes("${{"), "No expression interpolation in native shell");
       for (const code of [0, 3]) {
         const summary = path.join(dir, "summary");
@@ -105,9 +107,7 @@ exit "$TEST_EXIT"
         assert.equal(fs.readFileSync(path.join(dir, "cwd"), "utf8").trim(), fs.realpathSync(dir));
         assert.equal(fs.readFileSync(path.join(dir, "key"), "utf8").trim(),
           name === "Publish Hex members" ? "fake-key" : "unset");
-        const text = fs.readFileSync(summary, "utf8");
-        assert(text.includes(`## ${title}`));
-        assert.equal(text.includes("Failed (exit 3)"), code === 3);
+        assert.equal(fs.readFileSync(summary, "utf8"), "", "The outcome recorder owns summaries");
       }
     }
     const publishScript = step("Publish Hex members").split("        run: |\n")[1]
@@ -133,6 +133,9 @@ async function tests() {
       env: {TAG_OUTCOME: "success", PUBLISH_OUTCOME: mode === "git_only" ? "skipped" : "success"}});
     assert.equal(completed.writes[0].state, "success");
     assert.equal(completed.outputs.complete, "true");
+    assert(completed.summaries.includes("Trellis publish"));
+    assert(completed.summaries.includes("Trellis tag"));
+    assert(completed.summaries.includes(`Step outcome: \`${mode === "git_only" ? "skipped" : "success"}\`.\n`));
   }
   await assert.rejects(run("select", {mode: "unknown"}), /release_mode/);
   await assert.rejects(run("select", {env: {GLEAM_VERSION: ""}}), /requires/);
@@ -188,7 +191,14 @@ async function tests() {
     const failed = await run("publication-outcome", {mode, env: {TAG_OUTCOME: "failure", PUBLISH_OUTCOME: "success"}});
     assert.equal(failed.writes[0].state, "failure");
     assert.deepEqual(failed.outputs, {});
+    assert(failed.summaries.includes("Step outcome: `failure`.\n"));
   }
+  const skipped = await run("publication-outcome", {env: {TAG_OUTCOME: "skipped", PUBLISH_OUTCOME: "failure"}});
+  assert.equal(skipped.writes[0].state, "failure");
+  assert(skipped.summaries.includes("Step outcome: `skipped`.\n"));
+  const notRun = await run("publication-outcome");
+  assert.equal(notRun.writes[0].state, "failure");
+  assert(notRun.summaries.includes("Step outcome: `not run`.\n"));
   assert.equal((await run("publication-outcome", {env: {TAG_OUTCOME: "success", PUBLISH_OUTCOME: "failure"}}))
     .writes[0].state, "failure");
   for (const state of [null, "pending", "failure"]) {

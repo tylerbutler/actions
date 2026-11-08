@@ -203,13 +203,11 @@ jobs:
         env:
           HEXPM_API_KEY: ${{ secrets.hex_api_key }}
         run: |
-          trap 'code=$?; if (( code )); then printf "## Trellis publish\n\nFailed (exit %s).\n" "$code" >> "$GITHUB_STEP_SUMMARY"; fi' EXIT
           if [[ -z "$HEXPM_API_KEY" ]]; then
             echo "::error::hex_api_key is required for publication"
             exit 1
           fi
           trellis publish --all-untagged
-          printf '## Trellis publish\n\nHex publication completed.\n' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Tag approved release
         id: tag
@@ -224,10 +222,7 @@ jobs:
           GIT_CONFIG_VALUE_0: ''
           GIT_CONFIG_KEY_1: http.${{ steps.reserve.outputs.git_origin }}.extraheader
           GIT_CONFIG_VALUE_1: ${{ steps.reserve.outputs.git_header }}
-        run: |
-          trap 'code=$?; if (( code )); then printf "## Trellis tag\n\nFailed (exit %s).\n" "$code" >> "$GITHUB_STEP_SUMMARY"; fi' EXIT
-          trellis tag create --push --github-release
-          printf '## Trellis tag\n\nTag reconciliation completed.\n' >> "$GITHUB_STEP_SUMMARY"
+        run: trellis tag create --push --github-release
 
       - name: Record publication outcome
         id: publication
@@ -243,6 +238,13 @@ jobs:
             // script: publication-outcome
             const complete = process.env.TAG_OUTCOME === "success"
               && (process.env.RELEASE_MODE === "git_only" || process.env.PUBLISH_OUTCOME === "success");
+            for (const [name, outcome] of [
+              ["Trellis publish", process.env.PUBLISH_OUTCOME],
+              ["Trellis tag", process.env.TAG_OUTCOME],
+            ]) {
+              core.summary.addHeading(name, 2).addRaw(`Step outcome: \`${outcome || "not run"}\`.\n`);
+            }
+            await core.summary.write();
             await github.rest.repos.createCommitStatus({
               ...context.repo, sha: process.env.RELEASE_SHA, context: "trellis/release",
               state: complete ? "success" : "failure",
