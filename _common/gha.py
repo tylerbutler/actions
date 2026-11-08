@@ -26,6 +26,8 @@ def write_output(key: str, value: str) -> None:
     """
     if "\n" in value:
         sentinel = f"EOF_{re.sub(r'[^A-Z0-9]', '_', key.upper())}"
+        while sentinel in value.splitlines():
+            sentinel += "_"
         block = f"{key}<<{sentinel}\n{value}\n{sentinel}\n"
     else:
         block = f"{key}={value}\n"

@@ -1,0 +1,45 @@
+name: Trellis workspace
+description: Read trellis CI matrices and JSON-array workspace facts
+inputs:
+  working_directory:
+    description: Directory in the caller-owned trellis workspace
+    default: '.'
+  since:
+    description: Optional affected-selection base ref (requires history)
+    default: ''
+  releasable:
+    description: Restrict the matrix to releasable members, not workspace facts
+    default: 'false'
+outputs:
+  matrix:
+    description: Unmodified trellis strategy-matrix object
+    value: ${{ steps.workspace.outputs.matrix }}
+  has_packages:
+    description: Whether the selected matrix has entries
+    value: ${{ steps.workspace.outputs.has_packages }}
+  packages:
+    description: JSON array of all workspace package names
+    value: ${{ steps.workspace.outputs.packages }}
+  releasable:
+    description: JSON array of all releasable package names
+    value: ${{ steps.workspace.outputs.releasable }}
+  version_files:
+    description: JSON array of releasable manifest paths
+    value: ${{ steps.workspace.outputs.version_files }}
+  tags:
+    description: JSON array of immutable package tags
+    value: ${{ steps.workspace.outputs.tags }}
+  series_tags:
+    description: JSON array of moving package series tags
+    value: ${{ steps.workspace.outputs.series_tags }}
+runs:
+  using: composite
+  steps:
+    - name: Read workspace
+      id: workspace
+      shell: bash
+      env:
+        WORKING_DIRECTORY: ${{ inputs.working_directory }}
+        SINCE: ${{ inputs.since }}
+        RELEASABLE: ${{ inputs.releasable }}
+      run: python3 "$GITHUB_ACTION_PATH/workspace.py"

@@ -37,6 +37,52 @@ Supported binaries: Linux GNU x86_64/aarch64, macOS x86_64/aarch64, and Windows
 x86_64. Unsupported platforms and unavailable releases fail. You own checkout
 and Gleam/BEAM/Node setup; this action installs only trellis.
 
+### trellis-workspace
+
+Read an installed trellis workspace with `trellis ci matrix` and `trellis ci
+outputs`. Inputs: `working_directory` (`.`), `since` (empty, full workspace),
+and `releasable` (`false`, matrix selection only). Outputs: `matrix` (strategy
+object), `has_packages`, and JSON arrays `packages`, `releasable`,
+`version_files`, `tags`, `series_tags`. Workspace facts cover all members even
+when the matrix selects fewer. Package arrays contain names, not paths.
+
+```yaml
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.workspace.outputs.matrix }}
+      has_packages: ${{ steps.workspace.outputs.has_packages }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: tylerbutler/actions/setup-trellis@40890c0
+        with:
+          version: '1.3.0'
+      - uses: tylerbutler/actions/trellis-workspace@main
+        id: workspace
+        # Omit since for full selection. For affected-only PR checks use:
+        # with:
+        #   since: ${{ github.event.pull_request.base.sha }}
+  test:
+    needs: discover
+    if: needs.discover.outputs.has_packages == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+      # Install trellis and the package runtime here; jobs do not share binaries.
+      - run: echo "Selected $PACKAGE"
+        env:
+          PACKAGE: ${{ matrix.name }}
+```
+
+`since` includes changed packages and their dependents. Fetch the comparison
+ref/SHA and full history; invalid refs, missing history, malformed outputs, and
+CLI errors fail instead of returning an empty successful selection.
+
 ### setup-licence-audit
 
 Install the released `licence_audit` escript and optionally set up Erlang/OTP.
