@@ -284,6 +284,9 @@ This option supports one root package in `hex` or `mixed` mode. Trellis must
 provide one exact release tag whose name contains letters, digits, `.`, `_`,
 `+`, or `-` and starts with a letter or digit. Leave `sbom_package` empty to
 retain the existing release behavior.
+The coordinator selects configured current tags through `trellis ci outputs`
+and resolves them through `trellis ci tag-package --json`, including tags that
+already exist after a partial release.
 
 The coordinator installs the checksum-verified native Linux licence_audit
 release specified by `licence_audit_version`, without a Hex dependency or an

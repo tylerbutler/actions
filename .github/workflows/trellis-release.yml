@@ -239,18 +239,32 @@ jobs:
             if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version)) {
               throw new Error("Invalid SBOM package version.");
             }
-            const plan = await read(["tag", "plan", "--json"]);
-            if (plan.schema !== "trellis.tag_plan/2" || !Array.isArray(plan.tags)) {
-              throw new Error("Invalid Trellis tag contract.");
+            const facts = (await exec.getExecOutput("trellis", ["ci", "outputs"], {
+              cwd: process.env.WORKING_DIRECTORY,
+            })).stdout;
+            const lines = facts.match(/^tags=(.*)\r?$/gm) || [];
+            if (lines.length !== 1) throw new Error("Missing or duplicate Trellis tags output.");
+            const configured = JSON.parse(lines[0].slice("tags=".length));
+            if (!Array.isArray(configured) || configured.some(tag => typeof tag !== "string")
+                || new Set(configured).size !== configured.length) {
+              throw new Error("Invalid Trellis tags output.");
             }
-            const tags = plan.tags.filter(t => t.name === name && t.version === version && t.kind === "exact");
-            if (tags.length !== 1 || !/^[0-9A-Za-z][0-9A-Za-z._+-]*$/.test(tags[0].tag)) {
+            const tags = [];
+            for (const tag of configured) {
+              const resolved = await read(["ci", "tag-package", tag, "--json"]);
+              if (resolved.schema !== "trellis.ci_tag_package/1" || resolved.tag_kind !== "exact") {
+                throw new Error("Invalid Trellis exact tag contract.");
+              }
+              if (resolved.name === name && resolved.path === "." && resolved.version === version
+                  && resolved.tag_version === version) tags.push(tag);
+            }
+            if (tags.length !== 1 || !/^[0-9A-Za-z][0-9A-Za-z._+-]*$/.test(tags[0])) {
               throw new Error("SBOM requires one exact tag with a filename-safe name.");
             }
             core.setOutput("version", version);
-            core.setOutput("tag", tags[0].tag);
+            core.setOutput("tag", tags[0]);
             core.setOutput("path", `priv/${name}.cdx.json`);
-            core.setOutput("asset", `${tags[0].tag}.cdx.json`);
+            core.setOutput("asset", `${tags[0]}.cdx.json`);
             // end-script
 
       - name: Install native licence_audit

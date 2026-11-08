@@ -48,10 +48,15 @@ async function run(name, options = {}) {
     getExecOutput: async (command, args, execOptions = {}) => {
       commands.push([command, ...args]);
       commandEnvs.push(execOptions);
+      if (options.nativeExec) return options.nativeExec(command, args);
       if (args[0] === "remote") return {stdout: options.origin || "https://github.com/example/repo"};
       if (command === "git") return {stdout: options.checkout || SHA};
       if (args[0] === "list" && options.packageList) return {stdout: JSON.stringify(options.packageList)};
-      if (args[0] === "tag" && options.tagPlan) return {stdout: JSON.stringify(options.tagPlan)};
+      if (args[0] === "ci" && args[1] === "outputs") return {stdout: options.ciOutputs ?? ""};
+      if (args[0] === "ci" && args[1] === "tag-package") {
+        if (!options.tagPackages?.[args[2]]) throw new Error("Tag resolver failed");
+        return {stdout: JSON.stringify(options.tagPackages[args[2]])};
+      }
       if (args[0] === "release") {
         if (options.prepareFailure) throw new Error("trellis exit 3");
         return {stdout: options.prepareOutput ?? "outcome=prepared\n"};
@@ -275,6 +280,48 @@ if (name === "git") {
   }
 }
 
+async function nativeTaggedRetryTests() {
+  if (!process.env.SBOM_TEST_TRELLIS_BIN) return;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trellis-native-tagged-"));
+  const command = (name, args) => {
+    const result = spawnSync(name, args, {cwd: dir, encoding: "utf8"});
+    assert.equal(result.status, 0, `${name}: ${result.stderr}\n${result.stdout}`);
+    return result.stdout;
+  };
+  try {
+    command("git", ["init", "-q"]);
+    command("git", ["config", "user.name", "Test"]);
+    command("git", ["config", "user.email", "test@example.invalid"]);
+    const select = () => run("sbom-select", {env: {SBOM_PACKAGE: "fixture"},
+      nativeExec: (name, args) => {
+        assert.equal(name, "trellis");
+        return {stdout: command(process.env.SBOM_TEST_TRELLIS_BIN, args)};
+      }});
+    for (const [format, expected] of [["v{version}", "v1.0.0"],
+      ["release-{name}-v{version}", "release-fixture-v1.0.0"]]) {
+      fs.writeFileSync(path.join(dir, "gleam.toml"),
+        'name="fixture"\nversion="1.0.0"\n[tools.trellis.publish]\n'
+        + `exact_tag_format="${format}"\n`);
+      command("git", ["add", "gleam.toml"]);
+      command("git", ["commit", "-qm", "approved"]);
+      const initial = await select();
+      assert.equal(initial.outputs.tag, expected);
+      const pending = JSON.parse(command(process.env.SBOM_TEST_TRELLIS_BIN, ["tag", "plan", "--json"]));
+      assert(pending.tags.some(t => t.kind === "exact" && t.tag === expected),
+        "Configured tag must agree with the native untagged plan");
+      command("git", ["tag", "-a", initial.outputs.tag, "-m", "already tagged"]);
+      const plan = JSON.parse(command(process.env.SBOM_TEST_TRELLIS_BIN, ["tag", "plan", "--json"]));
+      assert.deepEqual(plan.tags, [], "Native tag plan omits an already tagged current version");
+      const retry = await select();
+      assert.deepEqual(retry.outputs, initial.outputs, "Tagged retry must retain the same SBOM asset identity");
+      assert(!retry.commands.some(c => c[1] === "tag"), "Selection must not mutate/reconcile tags");
+    }
+    console.log("native Trellis 1.3.0: custom-format annotated existing-tag retry passed");
+  } finally {
+    fs.rmSync(dir, {recursive: true, force: true});
+  }
+}
+
 async function nativeSbomContractTests() {
   if (!process.env.SBOM_TEST_TRELLIS_BIN || !process.env.SBOM_TEST_LICENCE_AUDIT_BIN) return;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trellis-native-sbom-"));
@@ -301,10 +348,11 @@ async function nativeSbomContractTests() {
     command("git", ["add", "gleam.toml", "manifest.toml", "src", ".gitignore"]);
     command("git", ["commit", "-qm", "approved"]);
     const sha = command("git", ["rev-parse", "HEAD"]);
-    const packageList = JSON.parse(command(process.env.SBOM_TEST_TRELLIS_BIN,
-      ["list", "--releasable", "--json"]));
-    const tagPlan = JSON.parse(command(process.env.SBOM_TEST_TRELLIS_BIN, ["tag", "plan", "--json"]));
-    const metadata = await run("sbom-select", {packageList, tagPlan, env: {SBOM_PACKAGE: "fixture"}});
+    const metadata = await run("sbom-select", {env: {SBOM_PACKAGE: "fixture"},
+      nativeExec: (name, args) => {
+        assert.equal(name, "trellis");
+        return {stdout: command(process.env.SBOM_TEST_TRELLIS_BIN, args)};
+      }});
     assert.equal(metadata.outputs.version, "1.0.0");
     const version = command(process.env.SBOM_TEST_LICENCE_AUDIT_BIN, ["--version"]);
     assert.equal(version, "0.15.0");
@@ -410,30 +458,46 @@ async function tests() {
   }
   const packageList = {schema: "trellis.list/1", packages: [
     {name: "shelf", version: "1.0.0", path: ".", lifecycle: "hex", releasable: true}]};
-  const tagPlan = {schema: "trellis.tag_plan/2", tags: [
-    {name: "shelf", version: "1.0.0", kind: "exact", tag: "custom-v1.0.0", action: "up_to_date"}]};
-  const metadata = await run("sbom-select", {packageList, tagPlan,
+  const ciOutputs = 'packages=["shelf"]\ntags=["custom-v1.0.0"]\nseries_tags=[]\n';
+  const resolved = {schema: "trellis.ci_tag_package/1", name: "shelf", path: ".",
+    version: "1.0.0", tag_kind: "exact", tag_version: "1.0.0"};
+  const tagPackages = {"custom-v1.0.0": resolved};
+  const metadata = await run("sbom-select", {packageList, ciOutputs, tagPackages,
     env: {SBOM_PACKAGE: "shelf", WORKING_DIRECTORY: "package with spaces"}});
   assert.deepEqual(metadata.outputs, {version: "1.0.0", tag: "custom-v1.0.0",
     path: "priv/shelf.cdx.json", asset: "custom-v1.0.0.cdx.json"});
   assert.deepEqual(metadata.commands, [["trellis", "list", "--releasable", "--json"],
-    ["trellis", "tag", "plan", "--json"]]);
+    ["trellis", "ci", "outputs"], ["trellis", "ci", "tag-package", "custom-v1.0.0", "--json"]]);
   assert(metadata.commandEnvs.every(o => o.cwd === "package with spaces"));
+  const multiple = await run("sbom-select", {packageList,
+    ciOutputs: 'tags=["other-v2.0.0","custom-v1.0.0"]\n',
+    tagPackages: {...tagPackages, "other-v2.0.0": {...resolved, name: "other", path: "packages/other",
+      version: "2.0.0", tag_version: "2.0.0"}}, env: {SBOM_PACKAGE: "shelf"}});
+  assert.deepEqual(multiple.outputs, metadata.outputs);
+  await assert.rejects(run("sbom-select", {packageList, ciOutputs: 'tags=["first","second"]\n',
+    tagPackages: {first: resolved, second: resolved}, env: {SBOM_PACKAGE: "shelf"}}), /one exact tag/);
   for (const change of [{path: "packages/shelf"}, {lifecycle: "git_only"}, {releasable: false},
     {version: "bad"}, {name: "other"}]) {
-    await assert.rejects(run("sbom-select", {tagPlan,
+    await assert.rejects(run("sbom-select", {ciOutputs, tagPackages,
       packageList: {...packageList, packages: [{...packageList.packages[0], ...change}]},
       env: {SBOM_PACKAGE: "shelf"}}), /root|version/);
   }
-  for (const tags of [[], [...tagPlan.tags, ...tagPlan.tags], [{...tagPlan.tags[0], kind: "series"}],
-    [{...tagPlan.tags[0], tag: "shelf/v1.0.0"}], [{...tagPlan.tags[0], version: "2.0.0"}]]) {
-    await assert.rejects(run("sbom-select", {packageList, tagPlan: {...tagPlan, tags},
-      env: {SBOM_PACKAGE: "shelf"}}), /exact tag/);
+  for (const facts of ["", "tags=[]\n", 'tags=["a"]\ntags=["b"]\n',
+    'tags=["a","a"]\n', "tags={}\n", 'tags=[12]\n']) {
+    await assert.rejects(run("sbom-select", {packageList, ciOutputs: facts, tagPackages,
+      env: {SBOM_PACKAGE: "shelf"}}), /tags output|exact tag/);
+  }
+  for (const change of [{tag_kind: "series"}, {schema: "trellis.ci_tag_package/2"},
+    {tag_version: "2.0.0"}, {version: "2.0.0"}, {path: "packages/shelf"}, {name: "other"}]) {
+    await assert.rejects(run("sbom-select", {packageList, ciOutputs,
+      tagPackages: {"custom-v1.0.0": {...resolved, ...change}}, env: {SBOM_PACKAGE: "shelf"}}), /exact tag/);
   }
   await assert.rejects(run("sbom-select", {packageList: {...packageList, schema: "trellis.list/2"},
     env: {SBOM_PACKAGE: "shelf"}}), /package contract/);
-  await assert.rejects(run("sbom-select", {packageList, tagPlan: {...tagPlan, schema: "trellis.tag_plan/3"},
-    env: {SBOM_PACKAGE: "shelf"}}), /tag contract/);
+  await assert.rejects(run("sbom-select", {packageList, ciOutputs: 'tags=["shelf/v1.0.0"]\n',
+    tagPackages: {"shelf/v1.0.0": resolved}, env: {SBOM_PACKAGE: "shelf"}}), /filename-safe/);
+  await assert.rejects(run("sbom-select", {packageList, ciOutputs, tagPackages: {},
+    env: {SBOM_PACKAGE: "shelf"}}), /resolver failed/);
   const sbomOutcomes = {SBOM_PACKAGE: "shelf", TAG_OUTCOME: "success", PUBLISH_OUTCOME: "success",
     GENERATE_SBOM_OUTCOME: "success", HEX_SBOM_OUTCOME: "success", RELEASE_SBOM_OUTCOME: "success"};
   assert.equal((await run("publication-outcome", {env: sbomOutcomes})).outputs.complete, "true");
@@ -562,6 +626,7 @@ async function tests() {
   }
   nativeShellTests();
   sbomShellTests();
+  await nativeTaggedRetryTests();
   await nativeSbomContractTests();
   for (const name of ["Select SBOM package and exact tag", "Install native licence_audit",
     "Generate and verify package SBOM", "Verify published Hex SBOM", "Reconcile GitHub Release SBOM"]) {
