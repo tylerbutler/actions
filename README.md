@@ -235,7 +235,7 @@ permissions:
   statuses: write
 jobs:
   release:
-    uses: tylerbutler/actions/.github/workflows/trellis-release.yml@51ea00b6772763052df96887bbe9109047756d7e # ratchet:tylerbutler/actions/.github/workflows/trellis-release.yml@main
+    uses: tylerbutler/actions/.github/workflows/trellis-release.yml@b5251fb5371cba5c47d489667c801434db49cd0d # ratchet:tylerbutler/actions/.github/workflows/trellis-release.yml@main
     with:
       trellis_version: '1.3.0'
       release_mode: mixed
@@ -276,7 +276,8 @@ Dispatch on the configured base. First candidate: `pre: rc`, `set:
 my_package=1.3.0`; next candidate: `pre: rc`; promotion: `pre: none`.
 Automatic pushes prepare stable releases but pause for candidates or a reserved
 manual request. The workflow writes a pending `trellis/release_request` status
-before manual preparation, including promotion and failures before PR creation.
+at trusted dispatch selection before checkout, installation, or manual
+preparation, including promotion and failures before PR creation.
 Unrelated pushes cannot replace that request. A successful no-op clears its
 reservation; a subsequent release merge ends ownership of earlier requests.
 
