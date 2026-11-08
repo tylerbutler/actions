@@ -111,6 +111,33 @@ when pushes and PR creation must trigger ordinary CI. The action configures
 both authenticated git and API operations for its process without persisting
 credentials. Caller workflows own approval, concurrency, and prior-release gates.
 
+### trellis-tag
+
+Run `trellis tag create` on the caller's approved release checkout. Inputs:
+`working_directory` (`.`), `push`, `github_release`, and `dry_run` (all false),
+plus `token` for remote operations. `github_release` implies push. Dry-run
+performs remote checks when requested but writes no tags/releases.
+
+Trellis reconciles immutable exact tags, moving package/repository series,
+release bodies, and retries. Conflicting immutable tags fail. Existing releases
+skip; candidate exact tags create GitHub prereleases without moving series
+tags, while stable promotion advances the configured series. The action does
+not require Hex publication; callers own ordering and concurrency.
+
+```yaml
+- uses: tylerbutler/actions/trellis-tag@main
+  with:
+    push: 'true'
+    github_release: 'true'
+    token: ${{ github.token }}
+```
+
+Use Contents read/write for tags/releases. Git-only bundles retain their
+repository paths: trellis validates coverage, but this action does not assemble
+or attach an archive. Include required workspace dependency paths in custom
+release artifacts. Never retry a completed old release to move series backward;
+the reusable release workflow guards that case.
+
 ### setup-licence-audit
 
 Install the released `licence_audit` escript and optionally set up Erlang/OTP.
