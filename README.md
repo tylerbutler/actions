@@ -18,6 +18,510 @@ Skipped or no-op runs still emit a section so the summary is a faithful record o
 
 ## Available Actions
 
+### setup-trellis
+
+Install an exact prebuilt trellis release, verify its checksum and version, and
+add its directory to the next step's `PATH`. `version` is required; `1.3.0` and
+`v1.3.0` select the same release. Outputs are `version` (without `v`) and `path`
+(the absolute binary path). Installation uses runner temporary storage, outside
+your checkout. There is no latest-version or source-build fallback.
+
+```yaml
+- uses: tylerbutler/actions/setup-trellis@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/setup-trellis@main
+  with:
+    version: '1.3.0'
+- run: trellis doctor --format github
+```
+
+Supported binaries: Linux GNU x86_64/aarch64, macOS x86_64/aarch64, and Windows
+x86_64. Windows ZIP releases contain `trellis.exe` at the archive root; Linux
+and macOS tarballs contain the binary under the asset directory.
+Unsupported platforms and unavailable releases fail. You own checkout
+and Gleam/BEAM/Node setup; this action installs only trellis.
+
+### trellis-workspace
+
+Read an installed trellis workspace with `trellis ci matrix` and `trellis ci
+outputs`. Inputs: `working_directory` (`.`), `since` (empty, full workspace),
+and `releasable` (`false`, matrix selection only). Outputs: `matrix` (strategy
+object), `has_packages`, and JSON arrays `packages`, `releasable`,
+`version_files`, `tags`, `series_tags`. Workspace facts cover all members even
+when the matrix selects fewer. Package arrays contain names, not paths.
+
+```yaml
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.workspace.outputs.matrix }}
+      has_packages: ${{ steps.workspace.outputs.has_packages }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: tylerbutler/actions/setup-trellis@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/setup-trellis@main
+        with:
+          version: '1.3.0'
+      - uses: tylerbutler/actions/trellis-workspace@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/trellis-workspace@main
+        id: workspace
+        # Omit since for full selection. For affected-only PR checks use:
+        # with:
+        #   since: ${{ github.event.pull_request.base.sha }}
+  test:
+    needs: discover
+    if: needs.discover.outputs.has_packages == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+      - uses: tylerbutler/actions/setup-gleam@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/setup-gleam@main
+        with:
+          version-file: ''
+          gleam-version: '1.13.0'
+          erlang-version: '28'
+          run-deps: 'false'
+      - uses: tylerbutler/actions/setup-trellis@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/setup-trellis@main
+        with:
+          version: '1.3.0'
+      - run: trellis run test "$PACKAGE"
+        env:
+          PACKAGE: ${{ matrix.name }}
+```
+
+`since` includes changed packages and their dependents. Fetch the comparison
+ref/SHA and full history; invalid refs, missing history, malformed outputs, and
+CLI errors fail instead of returning an empty successful selection.
+
+### trellis-release-pr
+
+Prepare a release with an installed trellis and a clean caller-owned checkout.
+Inputs: `working_directory` (`.`), `base` (`main`), `branch` (`release/pending`),
+`pre`, multiline `set` and `bump`, and required `token`. Each nonblank override
+line is one CLI argument. Empty `pre` leaves the CLI default; `pre: none`
+requests promotion. Trellis owns planning, candidate notes, stable rollup,
+commits, branch updates, and PR creation. The summary uses its structured
+outcome; this action exposes no scraped PR outputs.
+
+```yaml
+- uses: tylerbutler/actions/trellis-release-pr@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/trellis-release-pr@main
+  with:
+    token: ${{ steps.app.outputs.token }}
+    pre: rc
+    set: |
+      my_package=1.3.0
+```
+
+Omit `pre` and overrides for stable preparation. After the first candidate
+merges and publishes, use `pre: rc` for the next candidate, then `pre: none`
+to promote. Serialize calls to this action: trellis force-updates the designated
+remote branch with a lease. It rejects caller changes instead of removing them.
+Use a repository-scoped App token with Contents and Pull requests read/write
+when pushes and PR creation must trigger ordinary CI. The action configures
+both authenticated git and API operations for its process without persisting
+credentials. Caller workflows own approval, concurrency, and prior-release gates.
+
+### trellis-tag
+
+Run `trellis tag create` on the caller's approved release checkout. Inputs:
+`working_directory` (`.`), `push`, `github_release`, and `dry_run` (all false),
+plus `token` for remote operations. `github_release` implies push. Dry-run
+performs remote checks when requested but writes no tags/releases.
+
+Trellis reconciles immutable exact tags, moving package/repository series,
+release bodies, and retries. Conflicting immutable tags fail. Existing releases
+skip; candidate exact tags create GitHub prereleases without moving series
+tags, while stable promotion advances the configured series. The action does
+not require Hex publication; callers own ordering and concurrency.
+
+```yaml
+- uses: tylerbutler/actions/trellis-tag@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/trellis-tag@main
+  with:
+    push: 'true'
+    github_release: 'true'
+    token: ${{ github.token }}
+```
+
+Use Contents read/write for tags/releases. Git-only bundles retain their
+repository paths: trellis validates coverage, but this action does not assemble
+or attach an archive. Include required workspace dependency paths in custom
+release artifacts. Never retry a completed old release to move series backward;
+the reusable release workflow guards that case.
+
+### trellis-check
+
+Run doctor annotations and a branch-scoped changelog check, finish both reports,
+then fail if either command fails. Inputs: `working_directory` (`.`),
+`check_changelog` (`true`), and required explicit `base`/`head` refs when enabled.
+Install trellis and fetch the required history before calling.
+
+```yaml
+- uses: tylerbutler/actions/trellis-check@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/trellis-check@main
+  with:
+    base: ${{ github.event.pull_request.base.sha }}
+    head: ${{ github.event.pull_request.head.sha }}
+```
+
+Outputs match trellis 1.3.0: `ok`, `strictness`, `has_entries`, `needs_entry`,
+`needs_entry_packages`, `invalid_fragments`, and `preview`. Arrays stay JSON.
+`ok` is the changelog verdict; it does not override a failed doctor. Missing
+verdicts fail. The summary includes the preview and command outcomes.
+`check_changelog: 'false'` runs doctor alone.
+
+Trellis owns fragment attribution and strictness (`error`, `warn`, `off`);
+invalid fragments fail under all policies. The action never runs doctor fixes
+and works on ordinary fork PRs with Contents read-only. A sticky comment is an
+optional caller step that needs its own Pull requests write permission.
+
+### trellis-publish
+
+Publish with installed trellis and caller-provided Gleam/runtime tools.
+Inputs: `working_directory` (`.`), exactly one of `package`, `tag`, or
+`all_untagged` (`false`), `dry_run` (`false`), and `hex_api_key` for real
+publication or authenticated queries. The key is scoped to this step.
+The summary reports the CLI outcome; there are no log-derived per-package outputs.
+
+```yaml
+- uses: tylerbutler/actions/trellis-publish@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/trellis-publish@main
+  with:
+    all_untagged: 'true'
+    hex_api_key: ${{ secrets.HEXPM_API_KEY }}
+```
+
+Trellis owns dependency order, already-published checks, lifecycle selection,
+path-dependency requirements, source bundles, build/test validation, retry policy,
+and manifest restoration. Named Git-only/workspace packages fail; all-untagged
+publishes only Hex lifecycle members. Retry at the same approved release SHA
+after partial failure.
+
+`tag` must name an immutable exact package tag, with the matching manifest
+version and approved commit checked out. Moving series and repository tags are
+not publish selectors. Dry-run still queries Hex and prepares rewrites/bundles;
+it does not build/test the combined package or publish it. Callers own commit
+approval, serialization, and tagging.
+
+### trellis-release (reusable workflow)
+
+Call `.github/workflows/trellis-release.yml` from your trigger workflow. Require
+trellis 1.3.0, an explicit `release_mode` (`hex`, `git_only`, or `mixed`), and
+preparation App credentials. Optional inputs: `working_directory`, `base`
+(`main`), `release_branch` (`release/pending`), `pre`, multiline `set`/`bump`.
+Hex/mixed publication also requires pinned `gleam_version`, `erlang_version`,
+and `hex_api_key`. Git-only needs no Hex key or runtime installation.
+
+```yaml
+name: Release
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [closed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      pre:
+        description: Candidate label, none for promotion, or empty for stable
+        type: string
+        default: ''
+      set:
+        description: Exact package=version targets, one per line
+        type: string
+        default: ''
+      bump:
+        description: Bump overrides, one per line
+        type: string
+        default: ''
+permissions:
+  contents: write
+  pull-requests: read
+  statuses: write
+jobs:
+  release:
+    uses: tylerbutler/actions/.github/workflows/trellis-release.yml@41bb547a4588a47db7c852118dbde194913e9c8f # ratchet:tylerbutler/actions/.github/workflows/trellis-release.yml@main
+    with:
+      trellis_version: '1.3.0'
+      release_mode: mixed
+      gleam_version: '1.13.0'
+      erlang_version: '28'
+      pre: ${{ inputs.pre }}
+      set: ${{ inputs.set }}
+      bump: ${{ inputs.bump }}
+    secrets:
+      app_id: ${{ secrets.RELEASE_APP_ID }}
+      app_private_key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+      hex_api_key: ${{ secrets.HEXPM_API_KEY }}
+```
+
+For Git-only, use `release_mode: git_only` and omit the runtime inputs and Hex
+secret. Hex and mixed modes publish Hex members first, then tag all releasable
+members; workspace-only members have no release. Assemble Git-only artifacts in
+your own workflow. Do not add a second tag-triggered publisher to this recipe.
+
+The App needs Contents, Pull requests, and Commit statuses read/write on this
+repository. Preparation uses its installation token to trigger ordinary CI.
+Pending-branch checks use the same token for private git fetches without
+persisting checkout credentials.
+Publication uses a separate optional `publication_token`, or the workflow token,
+with Contents write, Pull requests read, and Commit statuses write. Hex credentials
+appear only in the publishing step. Protect the configured base with reviews and
+required checks; restrict release-branch pushes and release dispatch access.
+
+#### Approval, ownership, and recovery
+
+The workflow trusts only merged PRs from this repository's designated release
+branch to its configured base. It re-reads GitHub state and publishes the
+immutable approved merge SHA, never the unmerged branch or current base.
+All callers share repository-wide concurrency, no in-progress cancellation, and
+`queue: max` (up to 100 pending runs; excess runs cancel). Queue order follows
+waiting order, not dispatch order. Dispatch the next candidate after the previous
+one merges and completes publication.
+
+Dispatch on the configured base. First candidate: `pre: rc`, `set:
+my_package=1.3.0`; next candidate: `pre: rc`; promotion: `pre: none`.
+Automatic pushes prepare stable releases but pause for candidates or a reserved
+manual request. The workflow writes a pending `trellis/release_request` status
+at trusted dispatch selection before checkout, installation, or manual
+preparation, including promotion and failures before PR creation.
+Unrelated pushes cannot replace that request. A successful no-op clears its
+reservation; a subsequent release merge ends ownership of earlier requests.
+
+To abandon a manual request, close its PR, then clear the reservation on the
+recorded base SHA with a deliberate status update. Fix failures and rerun the
+manual preparation or dispatch the intended request again. Do not clear a
+reservation to bypass unfinished work.
+
+Publication writes `trellis/release: pending`, then success only after both
+publication and tagging finish. Missing, pending, or failed status on the latest
+merged release blocks new preparation. Recover by rerunning that merge-event run
+at its approved SHA. Partial retries skip Hex versions and reconcile remote tags
+and releases. Completed old runs skip publication/tagging, so they cannot move
+series tags backward; they retry preparation from current base instead.
+
+During adoption, verify publication, tags, and releases for the latest historical
+matching release PR before recording success on its merge SHA:
+
+```sh
+gh api --method POST "repos/OWNER/REPO/statuses/$RELEASE_SHA" \
+  -f context=trellis/release -f state=success \
+  -f description='Historical publication and tagging verified'
+```
+
+Do not mark partial or unknown releases successful. With no historical matching
+PR, no status seed is needed. Before that first merge the ownership scan reads
+full base history; API/rate-limit failures stop preparation. A stable-only
+alternative can publish from exact package-tag events using `trellis-publish`
+with `tag`; it requires matching approved checkouts and does not use this
+publish-then-tag coordinator.
+
+### Gleam workspace CI with trellis
+
+The existing `gleam-workspace-ci.yml` retains its kebab-case inputs and legacy
+workspace.toml path when `trellis_version` is empty. An exact version enables
+trellis discovery; no workspace.toml is required. A nondefault `workspace-file`
+override in trellis mode fails instead of guessing which format you intended.
+
+```yaml
+jobs:
+  ci:
+    uses: tylerbutler/actions/.github/workflows/gleam-workspace-ci.yml@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/.github/workflows/gleam-workspace-ci.yml@main
+    with:
+      working-directory: gleam
+      trellis_version: '1.3.0'
+      trellis_task: ci
+      trellis_check: true
+      trellis_changelog: true
+      trellis_base: ${{ github.event.pull_request.base.sha }}
+      trellis_head: ${{ github.event.pull_request.head.sha }}
+```
+
+Define `ci` in your workspace tasks; the workflow does not invent a configured
+task name. It runs `trellis run <task> <selected-package>` from the workspace
+directory and installs trellis in each job that uses it. A task replaces standard
+checks by default; set `trellis_task_with_checks: true` to run both, including any
+`custom-command`. Runtime/toolchain/cache options and explicit dependency
+installation retain their meaning.
+
+Selection defaults to all packages. Set `since` to an explicit comparison ref/SHA
+for affected selection with dependents. Trellis-mode checkouts fetch full history;
+ensure the requested refs exist. Empty selection skips the matrix job, while
+enabled diagnostics still run. `trellis_check` enables doctor; `trellis_changelog`
+also requires explicit base/head. Checks use read-only permissions for fork PRs.
+
+### Migrating legacy Gleam workflows to trellis
+
+Trellis 1.3.0 is published and supplies the commands these integrations require,
+including candidates, promotion, native release intent, and structured CI
+outputs. Earlier CI recipes upstream may mention a source snapshot; these
+examples install the published release. The SHA examples below become available
+to remote consumers when these local commits reach the remote.
+
+Keep legacy entry points for workspace.toml/changie consumers. A trellis
+workspace uses `[tools.trellis]` in its root `gleam.toml`; neither reader
+auto-detects or converts the other format.
+
+| Legacy contract | Trellis integration | Consumer change |
+|---|---|---|
+| `read-gleam-workspace`: space-separated `packages` paths | `trellis-workspace`: JSON `packages` names | Use a strategy matrix or direct CLI package names, not shell path splitting |
+| Comma-separated `projects` for changie | JSON `releasable` names | Let `trellis release pr` plan releases; do not pass this array to changie |
+| `version-files`: `name:path:version` records | `version_files`: JSON manifest paths | Trellis updates manifests itself; these are facts, not changie bump records |
+| `packages-json`: array of `{name,path,version}` | `matrix`: `{"include":[...]}` object plus `has_packages` | Use the entire object with `fromJSON`, and skip empty matrix jobs |
+| `cache-hash-globs` strings | No matching wrapper output | Use checkout-relative manifest globs with `hashFiles` |
+| `run-gleam-workspace`: sequential caller shell command | `trellis run` configured/built-in tasks; `trellis exec` commands | Select by package name and keep graph/task policy in trellis |
+| `gleam-publish`: ordered paths and optional rewrite maps | `trellis-publish`: one selector | Configure lifecycles/bundles in trellis; remove manual publish ordering/maps |
+
+#### Metadata and matrix: before
+
+```yaml
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      packages: ${{ steps.workspace.outputs.packages-json }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+      - uses: tylerbutler/actions/read-gleam-workspace@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/read-gleam-workspace@main
+        id: workspace
+        with:
+          workspace-file: workspace.toml
+  test:
+    needs: discover
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        package: ${{ fromJSON(needs.discover.outputs.packages) }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+      - uses: tylerbutler/actions/setup-gleam@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/setup-gleam@main
+        with:
+          version-file: ''
+          gleam-version: '1.13.0'
+          erlang-version: '28'
+          run-deps: 'false'
+      - uses: tylerbutler/actions/run-gleam-workspace@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/run-gleam-workspace@main
+        with:
+          packages: ${{ matrix.package.path }}
+          command: gleam test
+```
+
+**After:** use the complete [trellis-workspace matrix example](#trellis-workspace)
+above. Its `matrix` contains the strategy object; the job reads `matrix.name`
+instead of `matrix.package.path`. Set `since` only for affected selection.
+For a subdirectory, supply the same `working_directory` to discovery and task
+execution. JSON arrays do not replace legacy whitespace or comma-separated
+records without consumer changes.
+
+#### Tasks: before
+
+```yaml
+steps:
+  - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+  - uses: tylerbutler/actions/setup-gleam@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/setup-gleam@main
+    with:
+      version-file: ''
+      gleam-version: '1.13.0'
+      erlang-version: '28'
+      run-deps: 'false'
+  - uses: tylerbutler/actions/read-gleam-workspace@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/read-gleam-workspace@main
+    id: workspace
+  - uses: tylerbutler/actions/run-gleam-workspace@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/run-gleam-workspace@main
+    with:
+      packages: ${{ steps.workspace.outputs.packages }}
+      command: gleam test
+```
+
+#### Tasks: after
+
+```yaml
+steps:
+  - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+  - uses: tylerbutler/actions/setup-gleam@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/setup-gleam@main
+    with:
+      version-file: ''
+      gleam-version: '1.13.0'
+      erlang-version: '28'
+      run-deps: 'false'
+  - uses: tylerbutler/actions/setup-trellis@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/setup-trellis@main
+    with:
+      version: '1.3.0'
+  - run: trellis run test
+  - run: trellis exec --serial -- gleam check
+```
+
+`trellis run <task> [package names...]` runs built-ins or your configured task,
+with task exclusions and dependency-graph scheduling. `trellis exec [package
+names...] -- <command...>` runs an ad hoc argument-array command in package
+directories; it does not apply configured task behavior. Use `--serial` for
+sequential execution. No extra trellis-run wrapper is needed.
+
+#### Publishing: before
+
+```yaml
+steps:
+  - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+  - uses: tylerbutler/actions/setup-gleam@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/setup-gleam@main
+    with:
+      version-file: ''
+      gleam-version: '1.13.0'
+      erlang-version: '28'
+      run-deps: 'false'
+  - uses: tylerbutler/actions/gleam-publish@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/gleam-publish@main
+    with:
+      packages: packages/core packages/app
+      replace-path-deps: |
+        core:packages/core/gleam.toml
+      hex-api-key: ${{ secrets.HEXPM_API_KEY }}
+```
+
+#### Publishing: after
+
+```yaml
+steps:
+  - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+    with:
+      ref: ${{ inputs.approved_release_sha }}
+      fetch-depth: 0
+  - uses: tylerbutler/actions/setup-gleam@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/setup-gleam@main
+    with:
+      version-file: ''
+      gleam-version: '1.13.0'
+      erlang-version: '28'
+      run-deps: 'false'
+  - uses: tylerbutler/actions/setup-trellis@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/setup-trellis@main
+    with:
+      version: '1.3.0'
+  - uses: tylerbutler/actions/trellis-publish@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/trellis-publish@main
+    with:
+      all_untagged: 'true'
+      hex_api_key: ${{ secrets.HEXPM_API_KEY }}
+```
+
+The caller must validate `approved_release_sha` against a reviewed merge; the
+[reusable release workflow](#trellis-release-reusable-workflow) implements that
+check, concurrency, ownership, and recovery. The standalone action cannot grant
+approval to an arbitrary SHA.
+
+Legacy `gleam-publish` attempts packages in supplied order, detects
+already-published errors from Gleam logs, and can continue to later packages
+before reporting failures. Its rewrites change checkout manifests and remove
+lock/build state without restoration. It has no separate preflight build/test,
+backoff, lifecycle, or bundle implementation.
+
+Trellis requires declared manifest versions, queries Hex before publication,
+stops on an unrecovered failure, validates format/build/test, and uses configured
+retry policy. It restores rewritten manifests or stages combined bundles outside
+the checkout. Configure path requirements and lifecycle/bundle rules in
+`[tools.trellis.publish]`; its default range policy differs from the legacy
+pre-1.0 rewrite rule. Dry-run still queries Hex but omits build/test/publication.
+Git-only members receive versions/tags but no Hex upload; workspace members have
+no independent release. Hex source bundles include configured private dependency
+sources; Git-only bundles require caller-owned artifacts that preserve paths.
+
+Use [trellis-check](#trellis-check) for TOML fragment checks and doctor
+annotations, [trellis-release-pr](#trellis-release-pr) for preparation, and
+[trellis-tag](#trellis-tag) for reconciliation. Changie YAML fragments and
+legacy action outputs remain supported through their existing entry points;
+this migration does not switch their engines.
+
 ### setup-licence-audit
 
 Install the released `licence_audit` escript and optionally set up Erlang/OTP.
@@ -586,7 +1090,10 @@ jobs:
 
 ### read-gleam-workspace
 
-Parse a `workspace.toml` file and output structured package metadata for other actions. Designed as a "pre-step" that generates inputs for `gleam-publish`, `changie-release`, and `auto-tag` from a single source of truth.
+Read the legacy `workspace.toml` format and produce inputs for `gleam-publish`,
+`changie-release`, and `auto-tag`. For `[tools.trellis]` workspaces, use
+[trellis-workspace](#trellis-workspace). Its JSON outputs require the consumer
+changes in the [migration guide](#migrating-legacy-gleam-workflows-to-trellis).
 
 ```yaml
 - uses: tylerbutler/actions/read-gleam-workspace@main
@@ -702,6 +1209,8 @@ jobs:
 Run a shell command sequentially in each package returned by `read-gleam-workspace`.
 
 This is intended as an **escape hatch** for workspace-wide tasks that do not justify a dedicated action or reusable workflow. For standard Gleam CI, prefer `gleam-workspace-ci.yml`.
+For trellis workspaces, use `trellis run` for configured tasks or `trellis exec`
+for ad hoc commands; see the [before/after examples](#tasks-before).
 
 ```yaml
 - uses: tylerbutler/actions/read-gleam-workspace@main
@@ -735,7 +1244,10 @@ This is intended as an **escape hatch** for workspace-wide tasks that do not jus
 
 ### gleam-publish
 
-Publish Gleam packages to [Hex.pm](https://hex.pm/) in dependency order. Designed for monorepos with multiple Gleam packages — publishes each package sequentially and gracefully skips versions that are already on Hex.
+Publish Gleam packages to [Hex.pm](https://hex.pm/) in supplied dependency order
+with the legacy ordered-path contract. For trellis workspaces, use
+[trellis-publish](#trellis-publish) for CLI selection, lifecycle rules, bundles,
+validation, and retries. Existing inputs and outputs below remain unchanged.
 
 ```yaml
 - uses: tylerbutler/actions/gleam-publish@main

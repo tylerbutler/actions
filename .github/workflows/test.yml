@@ -9,6 +9,26 @@ permissions:
   contents: read
 
 jobs:
+  trellis-install:
+    name: trellis installer (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+      - uses: ./setup-trellis
+        id: trellis
+        with:
+          version: '1.3.0'
+      - name: Verify next-step PATH
+        shell: bash
+        env:
+          EXPECTED_VERSION: ${{ steps.trellis.outputs.version }}
+        run: |
+          test "$EXPECTED_VERSION" = 1.3.0
+          trellis --version | grep '^trellis 1.3.0'
+
   pytest:
     name: pytest (py${{ matrix.python }})
     runs-on: ubuntu-latest
@@ -25,7 +45,13 @@ jobs:
         uses: ./mise-setup
         with:
           working-directory: .
+      - uses: ./setup-trellis
+        id: trellis
+        with:
+          version: '1.3.0'
       - name: Run pytest
+        env:
+          TRELLIS_TEST_BIN: ${{ steps.trellis.outputs.path }}
         run: mise exec -- uvx pytest -v
 
   bash-tests:

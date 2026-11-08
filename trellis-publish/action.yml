@@ -1,0 +1,34 @@
+name: Trellis publish
+description: Publish Hex lifecycle members with trellis graph, bundle, and retry policy
+inputs:
+  working_directory:
+    description: Directory in the approved release checkout
+    default: '.'
+  package:
+    description: One Hex package name (exclusive with other selectors)
+    default: ''
+  tag:
+    description: Immutable exact package tag (exclusive with other selectors)
+    default: ''
+  all_untagged:
+    description: Publish all Hex lifecycle members absent from Hex
+    default: 'false'
+  dry_run:
+    description: Query Hex and prepare a plan without build/test/publication
+    default: 'false'
+  hex_api_key:
+    description: Hex API key, required for real publication
+    default: ''
+runs:
+  using: composite
+  steps:
+    - name: Publish Hex members
+      shell: bash
+      env:
+        WORKING_DIRECTORY: ${{ inputs.working_directory }}
+        PACKAGE: ${{ inputs.package }}
+        TAG: ${{ inputs.tag }}
+        ALL_UNTAGGED: ${{ inputs.all_untagged }}
+        DRY_RUN: ${{ inputs.dry_run }}
+        HEXPM_API_KEY: ${{ inputs.hex_api_key }}
+      run: python3 "$GITHUB_ACTION_PATH/publish.py"

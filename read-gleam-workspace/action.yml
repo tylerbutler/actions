@@ -1,5 +1,5 @@
 name: 'Read Gleam Workspace'
-description: 'Parse workspace.toml and output structured package metadata for other actions'
+description: 'Legacy workspace.toml metadata reader; use trellis-workspace for trellis workspaces'
 
 inputs:
   working-directory:

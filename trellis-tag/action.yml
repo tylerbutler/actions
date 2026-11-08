@@ -1,0 +1,30 @@
+name: Trellis tag
+description: Reconcile trellis release tags and optional GitHub releases
+inputs:
+  working_directory:
+    description: Directory in the approved release checkout
+    default: '.'
+  push:
+    description: Push tags to origin
+    default: 'false'
+  github_release:
+    description: Create GitHub releases (implies push)
+    default: 'false'
+  dry_run:
+    description: Report actions without writes (remote checks still run)
+    default: 'false'
+  token:
+    description: GitHub token required for push or github_release
+    default: ''
+runs:
+  using: composite
+  steps:
+    - name: Reconcile tags
+      shell: bash
+      env:
+        WORKING_DIRECTORY: ${{ inputs.working_directory }}
+        PUSH: ${{ inputs.push }}
+        GITHUB_RELEASE: ${{ inputs.github_release }}
+        DRY_RUN: ${{ inputs.dry_run }}
+        TOKEN: ${{ inputs.token }}
+      run: python3 "$GITHUB_ACTION_PATH/tag.py"

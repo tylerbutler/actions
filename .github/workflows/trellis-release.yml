@@ -1,0 +1,401 @@
+name: Trellis release
+on:
+  workflow_call:
+    inputs:
+      trellis_version:
+        description: Exact trellis release version (1.3.0 or newer compatible release)
+        required: true
+        type: string
+      working_directory:
+        type: string
+        default: '.'
+      base:
+        type: string
+        default: main
+      release_branch:
+        type: string
+        default: release/pending
+      release_mode:
+        description: hex, git_only, or mixed
+        required: true
+        type: string
+      pre:
+        type: string
+        default: ''
+      set:
+        type: string
+        default: ''
+      bump:
+        type: string
+        default: ''
+      gleam_version:
+        description: Required for Hex or mixed publication
+        type: string
+        default: ''
+      erlang_version:
+        description: Required for Hex or mixed publication
+        type: string
+        default: ''
+    secrets:
+      app_id:
+        required: true
+      app_private_key:
+        required: true
+      publication_token:
+        description: Optional publication token; defaults to the workflow token
+        required: false
+      hex_api_key:
+        required: false
+
+concurrency:
+  group: trellis-release-${{ github.repository }}
+  queue: max
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: read
+  statuses: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_BASE: ${{ inputs.base }}
+      RELEASE_BRANCH: ${{ inputs.release_branch }}
+      RELEASE_MODE: ${{ inputs.release_mode }}
+      WORKING_DIRECTORY: ${{ inputs.working_directory }}
+    steps:
+      - name: Select trusted release
+        id: select
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # ratchet:actions/github-script@v8
+        env:
+          GLEAM_VERSION: ${{ inputs.gleam_version }}
+          ERLANG_VERSION: ${{ inputs.erlang_version }}
+        with:
+          github-token: ${{ secrets.publication_token || github.token }}
+          script: |
+            // script: select
+            const repo = context.repo;
+            const base = process.env.RELEASE_BASE;
+            const branch = process.env.RELEASE_BRANCH;
+            const mode = process.env.RELEASE_MODE;
+            if (!["hex", "git_only", "mixed"].includes(mode)) throw new Error("Invalid release_mode.");
+            if (!base || !branch || base === branch || /[\s~^:?*\\[]/.test(base + branch)
+                || base.startsWith("-") || branch.startsWith("-")) throw new Error("Invalid release branches.");
+            await exec.getExecOutput("git", ["check-ref-format", "--branch", base]);
+            await exec.getExecOutput("git", ["check-ref-format", "--branch", branch]);
+            if (mode !== "git_only" && (!process.env.GLEAM_VERSION || !process.env.ERLANG_VERSION)) {
+              throw new Error("Hex/mixed publication requires gleam_version and erlang_version.");
+            }
+            const sameRepo = pr => pr.head.ref === branch && pr.base.ref === base
+              && pr.head.repo?.full_name === `${repo.owner}/${repo.repo}`
+              && pr.base.repo?.full_name === `${repo.owner}/${repo.repo}`;
+            if (context.eventName === "pull_request") {
+              if (context.payload.action !== "closed") return;
+              const event = context.payload.pull_request;
+              const {data: pr} = await github.rest.pulls.get({...repo, pull_number: event.number});
+              if (!pr.merged || !sameRepo(pr)) return;
+              if (!/^[0-9a-f]{40}$/.test(pr.merge_commit_sha || "")
+                  || pr.merge_commit_sha !== event.merge_commit_sha || !event.merged
+                  || !sameRepo(event)) throw new Error("Release event does not match trusted merge state.");
+              const statuses = await github.paginate(github.rest.repos.listCommitStatusesForRef, {
+                ...repo, ref: pr.merge_commit_sha,
+              });
+              if (statuses.find(s => s.context === "trellis/release")?.state === "success") {
+                core.info("Completed release: skip publication and tagging; recover current-base preparation.");
+                core.setOutput("prepare", "true");
+                return;
+              }
+              const {data: comparison} = await github.rest.repos.compareCommitsWithBasehead({
+                ...repo, basehead: `${pr.merge_commit_sha}...${base}`,
+              });
+              if (!["ahead", "identical"].includes(comparison.status)) {
+                throw new Error("Approved merge is not on the configured base.");
+              }
+              const closed = await github.paginate(github.rest.pulls.list, {
+                ...repo, state: "closed", base, sort: "updated", direction: "desc",
+              });
+              const latest = closed.filter(p => p.merged_at && sameRepo(p))
+                .sort((a,b) => Date.parse(b.merged_at) - Date.parse(a.merged_at))[0];
+              if (!latest || latest.merge_commit_sha !== pr.merge_commit_sha) {
+                throw new Error("A newer release exists; do not publish stale release state.");
+              }
+              core.setOutput("publish_sha", pr.merge_commit_sha);
+            } else if (["push", "workflow_dispatch"].includes(context.eventName)) {
+              if (context.ref !== `refs/heads/${base}`) throw new Error("Prepare on the configured base branch.");
+              if (context.eventName === "workflow_dispatch") {
+                const {data: ref} = await github.rest.git.getRef({...repo, ref: `heads/${base}`});
+                const sha = ref.object.sha;
+                if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error("Invalid manual reservation base SHA.");
+                await github.rest.repos.createCommitStatus({
+                  ...repo, sha, context: "trellis/release_request", state: "pending",
+                  description: "Manual request reserved before checkout, installation, and preparation",
+                });
+              }
+              core.setOutput("prepare", "true");
+            } else {
+              throw new Error("Unsupported release event.");
+            }
+            // end-script
+
+      - name: Check out approved merge
+        if: steps.select.outputs.publish_sha != ''
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+        with:
+          ref: ${{ steps.select.outputs.publish_sha }}
+          fetch-depth: 0
+          token: ${{ secrets.publication_token || github.token }}
+          persist-credentials: false
+
+      - name: Install publication trellis
+        if: steps.select.outputs.publish_sha != ''
+        uses: tylerbutler/actions/setup-trellis@a3fb247ca6dd1ebfa060e9f373178f68333086fd # ratchet:tylerbutler/actions/setup-trellis@main
+        with:
+          version: ${{ inputs.trellis_version }}
+
+      - name: Verify checkout and reserve publication
+        if: steps.select.outputs.publish_sha != ''
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # ratchet:actions/github-script@v8
+        env:
+          RELEASE_SHA: ${{ steps.select.outputs.publish_sha }}
+        with:
+          github-token: ${{ secrets.publication_token || github.token }}
+          script: |
+            // script: reserve-publication
+            const sha = process.env.RELEASE_SHA;
+            const result = await exec.getExecOutput("git", ["rev-parse", "HEAD"]);
+            if (result.stdout.trim() !== sha) throw new Error("Release checkout changed.");
+            await github.rest.repos.createCommitStatus({
+              ...context.repo, sha, context: "trellis/release", state: "pending",
+              description: "Publication and tagging started",
+            });
+            // end-script
+
+      - name: Setup Hex runtime
+        if: steps.select.outputs.publish_sha != '' && inputs.release_mode != 'git_only'
+        uses: tylerbutler/actions/setup-gleam@a3fb247ca6dd1ebfa060e9f373178f68333086fd # ratchet:tylerbutler/actions/setup-gleam@main
+        with:
+          version-file: ''
+          gleam-version: ${{ inputs.gleam_version }}
+          erlang-version: ${{ inputs.erlang_version }}
+          working-directory: ${{ inputs.working_directory }}
+          run-deps: 'false'
+          cache: 'false'
+          tools: ''
+
+      - name: Publish Hex members
+        id: publish
+        if: steps.select.outputs.publish_sha != '' && inputs.release_mode != 'git_only'
+        uses: tylerbutler/actions/trellis-publish@a3fb247ca6dd1ebfa060e9f373178f68333086fd # ratchet:tylerbutler/actions/trellis-publish@main
+        with:
+          working_directory: ${{ inputs.working_directory }}
+          all_untagged: 'true'
+          hex_api_key: ${{ secrets.hex_api_key }}
+
+      - name: Tag approved release
+        id: tag
+        if: steps.select.outputs.publish_sha != ''
+        uses: tylerbutler/actions/trellis-tag@a3fb247ca6dd1ebfa060e9f373178f68333086fd # ratchet:tylerbutler/actions/trellis-tag@main
+        with:
+          working_directory: ${{ inputs.working_directory }}
+          push: 'true'
+          github_release: 'true'
+          token: ${{ secrets.publication_token || github.token }}
+
+      - name: Record publication outcome
+        id: publication
+        if: always() && steps.select.outputs.publish_sha != ''
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # ratchet:actions/github-script@v8
+        env:
+          RELEASE_SHA: ${{ steps.select.outputs.publish_sha }}
+          TAG_OUTCOME: ${{ steps.tag.outcome }}
+          PUBLISH_OUTCOME: ${{ steps.publish.outcome }}
+        with:
+          github-token: ${{ secrets.publication_token || github.token }}
+          script: |
+            // script: publication-outcome
+            const complete = process.env.TAG_OUTCOME === "success"
+              && (process.env.RELEASE_MODE === "git_only" || process.env.PUBLISH_OUTCOME === "success");
+            await github.rest.repos.createCommitStatus({
+              ...context.repo, sha: process.env.RELEASE_SHA, context: "trellis/release",
+              state: complete ? "success" : "failure",
+              description: complete ? "Publication and tagging complete" : "Recover at the approved merge SHA",
+            });
+            if (complete) core.setOutput("complete", "true");
+            // end-script
+
+      - name: Create preparation App token
+        if: steps.select.outputs.prepare == 'true' || steps.publication.outputs.complete == 'true'
+        id: app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # ratchet:actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.app_id }}
+          private-key: ${{ secrets.app_private_key }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+
+      - name: Check out current base
+        if: steps.select.outputs.prepare == 'true' || steps.publication.outputs.complete == 'true'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+        with:
+          ref: ${{ inputs.base }}
+          fetch-depth: 0
+          token: ${{ steps.app.outputs.token }}
+          persist-credentials: false
+
+      - name: Install preparation trellis
+        if: steps.select.outputs.prepare == 'true' || steps.publication.outputs.complete == 'true'
+        uses: tylerbutler/actions/setup-trellis@a3fb247ca6dd1ebfa060e9f373178f68333086fd # ratchet:tylerbutler/actions/setup-trellis@main
+        with:
+          version: ${{ inputs.trellis_version }}
+
+      - name: Gate and reserve preparation
+        id: gate
+        if: steps.select.outputs.prepare == 'true' || steps.publication.outputs.complete == 'true'
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # ratchet:actions/github-script@v8
+        env:
+          PREPARATION_TOKEN: ${{ steps.app.outputs.token }}
+        with:
+          github-token: ${{ steps.app.outputs.token }}
+          script: |
+            // script: prepare-gate
+            const repo = context.repo;
+            const base = process.env.RELEASE_BASE;
+            const branch = process.env.RELEASE_BRANCH;
+            const sameRepo = pr => pr.head.ref === branch && pr.base.ref === base
+              && pr.head.repo?.full_name === `${repo.owner}/${repo.repo}`
+              && pr.base.repo?.full_name === `${repo.owner}/${repo.repo}`;
+            const closed = await github.paginate(github.rest.pulls.list, {
+              ...repo, state: "closed", base, sort: "updated", direction: "desc",
+            });
+            const latest = closed.filter(pr => pr.merged_at && sameRepo(pr))
+              .sort((a,b) => Date.parse(b.merged_at) - Date.parse(a.merged_at))[0];
+            const statuses = ref => github.paginate(github.rest.repos.listCommitStatusesForRef, {...repo, ref});
+            if (latest && (await statuses(latest.merge_commit_sha))
+                .find(s => s.context === "trellis/release")?.state !== "success") {
+              core.info("Previous release incomplete or unknown; recover its merge run before preparation.");
+              return;
+            }
+            const open = (await github.paginate(github.rest.pulls.list, {
+              ...repo, state: "open", base, head: `${repo.owner}:${branch}`,
+            })).filter(sameRepo);
+            if (open.length > 1) throw new Error("Multiple pending release PRs.");
+            const manual = context.eventName === "workflow_dispatch";
+            const reservations = [];
+            {
+              for await (const page of github.paginate.iterator(github.rest.repos.listCommits, {
+                ...repo, sha: base, per_page: 100,
+              })) {
+                let reached = false;
+                for (const commit of page.data) {
+                  if ((await statuses(commit.sha))
+                      .find(s => s.context === "trellis/release_request")?.state === "pending") {
+                    if (!manual) {
+                      core.info("Manual request owns preparation, including before PR creation.");
+                      return;
+                    }
+                    reservations.push(commit.sha);
+                  }
+                  if (commit.sha === latest?.merge_commit_sha) { reached = true; break; }
+                }
+                if (reached) break;
+              }
+            }
+            const current = (await exec.getExecOutput("git", ["rev-parse", "HEAD"])).stdout.trim();
+            const versions = async () => {
+              const result = await exec.getExecOutput("trellis", ["list", "--releasable", "--json"], {
+                cwd: process.env.WORKING_DIRECTORY,
+              });
+              const packages = JSON.parse(result.stdout).packages;
+              if (!Array.isArray(packages) || packages.some(p => typeof p.version !== "string")) {
+                throw new Error("Invalid releasable package output.");
+              }
+              return packages;
+            };
+            const candidate = packages => packages.some(p => p.version.split("+")[0].includes("-"));
+            if (!manual) {
+              if (candidate(await versions())) { core.info("Candidate base requires a manual request."); return; }
+              if (open[0]) {
+                if (!/^[0-9a-f]{40}$/.test(open[0].head.sha)) throw new Error("Invalid pending head SHA.");
+                const origin = (await exec.getExecOutput("git", ["remote", "get-url", "origin"])).stdout.trim();
+                const expected = `${context.serverUrl}/${repo.owner}/${repo.repo}`;
+                if (![expected, `${expected}.git`].includes(origin)) throw new Error("Unexpected checkout origin.");
+                const token = process.env.PREPARATION_TOKEN;
+                if (!token) throw new Error("Pending release fetch requires the preparation token.");
+                const header = "AUTHORIZATION: basic " + Buffer.from(`x-access-token:${token}`).toString("base64");
+                core.setSecret(header);
+                const gitEnv = {...process.env};
+                let count = Number(gitEnv.GIT_CONFIG_COUNT || "0");
+                if (!Number.isSafeInteger(count) || count < 0) throw new Error("Invalid Git config count.");
+                for (const value of ["", header]) {
+                  gitEnv[`GIT_CONFIG_KEY_${count}`] = `http.${origin}.extraheader`;
+                  gitEnv[`GIT_CONFIG_VALUE_${count}`] = value;
+                  count++;
+                }
+                gitEnv.GIT_CONFIG_COUNT = String(count);
+                await exec.exec("git", ["fetch", "origin", open[0].head.sha], {env: gitEnv});
+                let pendingCandidate;
+                try {
+                  await exec.exec("git", ["checkout", "--detach", open[0].head.sha]);
+                  pendingCandidate = candidate(await versions());
+                } finally {
+                  await exec.exec("git", ["checkout", base]);
+                  const restored = (await exec.getExecOutput("git", ["rev-parse", "HEAD"])).stdout.trim();
+                  if (restored !== current) throw new Error("Preparation checkout changed.");
+                }
+                if (pendingCandidate) { core.info("Pending candidate requires a manual request."); return; }
+              }
+            }
+            if (manual) {
+              await github.rest.repos.createCommitStatus({
+                ...repo, sha: current, context: "trellis/release_request", state: "pending",
+                description: "Manual request owns preparation until merge or explicit abandonment",
+              });
+              core.setOutput("reservation_sha", current);
+              core.setOutput("reservation_shas", JSON.stringify([...new Set([...reservations, current])]));
+            }
+            core.setOutput("prepare", "true");
+            // end-script
+
+      - name: Prepare release PR
+        id: prepare
+        if: steps.gate.outputs.prepare == 'true'
+        uses: tylerbutler/actions/trellis-release-pr@a3fb247ca6dd1ebfa060e9f373178f68333086fd # ratchet:tylerbutler/actions/trellis-release-pr@main
+        with:
+          working_directory: ${{ inputs.working_directory }}
+          base: ${{ inputs.base }}
+          branch: ${{ inputs.release_branch }}
+          pre: ${{ github.event_name == 'workflow_dispatch' && inputs.pre || '' }}
+          set: ${{ github.event_name == 'workflow_dispatch' && inputs.set || '' }}
+          bump: ${{ github.event_name == 'workflow_dispatch' && inputs.bump || '' }}
+          token: ${{ steps.app.outputs.token }}
+
+      - name: Clear successful manual no-op
+        if: steps.prepare.outcome == 'success' && steps.gate.outputs.reservation_sha != ''
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # ratchet:actions/github-script@v8
+        env:
+          RESERVATION_SHAS: ${{ steps.gate.outputs.reservation_shas }}
+        with:
+          github-token: ${{ steps.app.outputs.token }}
+          script: |
+            // script: clear-noop
+            const repo = context.repo;
+            const open = await github.paginate(github.rest.pulls.list, {
+              ...repo, state: "open", base: process.env.RELEASE_BASE,
+              head: `${repo.owner}:${process.env.RELEASE_BRANCH}`,
+            });
+            if (open.some(pr => pr.head.repo?.full_name === `${repo.owner}/${repo.repo}`
+                && pr.base.repo?.full_name === `${repo.owner}/${repo.repo}`
+                && pr.head.ref === process.env.RELEASE_BRANCH && pr.base.ref === process.env.RELEASE_BASE)) return;
+            const reservations = JSON.parse(process.env.RESERVATION_SHAS);
+            if (!Array.isArray(reservations) || reservations.some(sha => !/^[0-9a-f]{40}$/.test(sha))) {
+              throw new Error("Invalid reservation SHAs.");
+            }
+            for (const sha of reservations) {
+              await github.rest.repos.createCommitStatus({
+                ...repo, sha, context: "trellis/release_request",
+                state: "success", description: "Manual preparation completed without a pending PR",
+              });
+            }
+            // end-script
