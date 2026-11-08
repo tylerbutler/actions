@@ -235,7 +235,7 @@ permissions:
   statuses: write
 jobs:
   release:
-    uses: tylerbutler/actions/.github/workflows/trellis-release.yml@b5251fb5371cba5c47d489667c801434db49cd0d # ratchet:tylerbutler/actions/.github/workflows/trellis-release.yml@main
+    uses: tylerbutler/actions/.github/workflows/trellis-release.yml@a79f103451e63d424a63e5de94d2ca478cc4a895 # ratchet:tylerbutler/actions/.github/workflows/trellis-release.yml@main
     with:
       trellis_version: '1.3.0'
       release_mode: mixed
@@ -257,6 +257,8 @@ your own workflow. Do not add a second tag-triggered publisher to this recipe.
 
 The App needs Contents, Pull requests, and Commit statuses read/write on this
 repository. Preparation uses its installation token to trigger ordinary CI.
+Pending-branch checks use the same token for private git fetches without
+persisting checkout credentials.
 Publication uses a separate optional `publication_token`, or the workflow token,
 with Contents write, Pull requests read, and Commit statuses write. Hex credentials
 appear only in the publishing step. Protect the configured base with reviews and
