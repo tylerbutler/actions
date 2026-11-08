@@ -190,6 +190,116 @@ not publish selectors. Dry-run still queries Hex and prepares rewrites/bundles;
 it does not build/test the combined package or publish it. Callers own commit
 approval, serialization, and tagging.
 
+### trellis-release (reusable workflow)
+
+Call `.github/workflows/trellis-release.yml` from your trigger workflow. Require
+trellis 1.3.0, an explicit `release_mode` (`hex`, `git_only`, or `mixed`), and
+preparation App credentials. Optional inputs: `working_directory`, `base`
+(`main`), `release_branch` (`release/pending`), `pre`, multiline `set`/`bump`.
+Hex/mixed publication also requires pinned `gleam_version`, `erlang_version`,
+and `hex_api_key`. Git-only needs no Hex key or runtime installation.
+
+```yaml
+name: Release
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [closed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      pre:
+        description: Candidate label, none for promotion, or empty for stable
+        type: string
+        default: ''
+      set:
+        description: Exact package=version targets, one per line
+        type: string
+        default: ''
+      bump:
+        description: Bump overrides, one per line
+        type: string
+        default: ''
+permissions:
+  contents: write
+  pull-requests: read
+  statuses: write
+jobs:
+  release:
+    uses: tylerbutler/actions/.github/workflows/trellis-release.yml@main
+    with:
+      trellis_version: '1.3.0'
+      release_mode: mixed
+      gleam_version: '1.13.0'
+      erlang_version: '28'
+      pre: ${{ inputs.pre }}
+      set: ${{ inputs.set }}
+      bump: ${{ inputs.bump }}
+    secrets:
+      app_id: ${{ secrets.RELEASE_APP_ID }}
+      app_private_key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+      hex_api_key: ${{ secrets.HEXPM_API_KEY }}
+```
+
+For Git-only, use `release_mode: git_only` and omit the runtime inputs and Hex
+secret. Hex and mixed modes publish Hex members first, then tag all releasable
+members; workspace-only members have no release. Assemble Git-only artifacts in
+your own workflow. Do not add a second tag-triggered publisher to this recipe.
+
+The App needs Contents, Pull requests, and Commit statuses read/write on this
+repository. Preparation uses its installation token to trigger ordinary CI.
+Publication uses a separate optional `publication_token`, or the workflow token,
+with Contents write, Pull requests read, and Commit statuses write. Hex credentials
+appear only in the publishing step. Protect the configured base with reviews and
+required checks; restrict release-branch pushes and release dispatch access.
+
+#### Approval, ownership, and recovery
+
+The workflow trusts only merged PRs from this repository's designated release
+branch to its configured base. It re-reads GitHub state and publishes the
+immutable approved merge SHA, never the unmerged branch or current base.
+All callers share repository-wide concurrency, no in-progress cancellation, and
+`queue: max` (up to 100 pending runs; excess runs cancel). Queue order follows
+waiting order, not dispatch order. Dispatch the next candidate after the previous
+one merges and completes publication.
+
+Dispatch on the configured base. First candidate: `pre: rc`, `set:
+my_package=1.3.0`; next candidate: `pre: rc`; promotion: `pre: none`.
+Automatic pushes prepare stable releases but pause for candidates or a reserved
+manual request. The workflow writes a pending `trellis/release_request` status
+before manual preparation, including promotion and failures before PR creation.
+Unrelated pushes cannot replace that request. A successful no-op clears its
+reservation; a subsequent release merge ends ownership of earlier requests.
+
+To abandon a manual request, close its PR, then clear the reservation on the
+recorded base SHA with a deliberate status update. Fix failures and rerun the
+manual preparation or dispatch the intended request again. Do not clear a
+reservation to bypass unfinished work.
+
+Publication writes `trellis/release: pending`, then success only after both
+publication and tagging finish. Missing, pending, or failed status on the latest
+merged release blocks new preparation. Recover by rerunning that merge-event run
+at its approved SHA. Partial retries skip Hex versions and reconcile remote tags
+and releases. Completed old runs skip publication/tagging, so they cannot move
+series tags backward; they retry preparation from current base instead.
+
+During adoption, verify publication, tags, and releases for the latest historical
+matching release PR before recording success on its merge SHA:
+
+```sh
+gh api --method POST "repos/OWNER/REPO/statuses/$RELEASE_SHA" \
+  -f context=trellis/release -f state=success \
+  -f description='Historical publication and tagging verified'
+```
+
+Do not mark partial or unknown releases successful. With no historical matching
+PR, no status seed is needed. Before that first merge the ownership scan reads
+full base history; API/rate-limit failures stop preparation. A stable-only
+alternative can publish from exact package-tag events using `trellis-publish`
+with `tag`; it requires matching approved checkouts and does not use this
+publish-then-tag coordinator.
+
 ### setup-licence-audit
 
 Install the released `licence_audit` escript and optionally set up Erlang/OTP.
