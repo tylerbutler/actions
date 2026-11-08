@@ -47,7 +47,7 @@ def test_unsupported_platform(system, machine):
 def test_zip_extract_ignores_other_files(tmp_path):
     archive = tmp_path / "binary.zip"
     with zipfile.ZipFile(archive, "w") as bundle:
-        bundle.writestr("root/trellis.exe", b"binary")
+        bundle.writestr("trellis.exe", b"binary")
         bundle.writestr("../escaped", b"bad")
     installer.extract(archive, "root", "trellis.exe", tmp_path / "trellis.exe")
     assert (tmp_path / "trellis.exe").read_bytes() == b"binary"
@@ -55,16 +55,24 @@ def test_zip_extract_ignores_other_files(tmp_path):
 
 
 @pytest.mark.parametrize("problem", ["download", "checksum", "version", None])
-def test_install_and_cleanup(tmp_path, problem):
+@pytest.mark.parametrize("system,machine", [("Linux", "x86_64"), ("Windows", "AMD64")])
+def test_install_and_cleanup(tmp_path, problem, system, machine):
+    triple, extension, binary = installer.target(system, machine)
+    asset_root = f"trellis-gleam-{triple}"
+    asset = f"{asset_root}.{extension}"
     buffer = io.BytesIO()
-    with tarfile.open(fileobj=buffer, mode="w:xz") as bundle:
-        member = tarfile.TarInfo("trellis-gleam-x86_64-unknown-linux-gnu/trellis")
-        member.size = 6
-        bundle.addfile(member, io.BytesIO(b"binary"))
+    if extension == "zip":
+        with zipfile.ZipFile(buffer, "w") as bundle:
+            bundle.writestr(binary, b"binary")
+    else:
+        with tarfile.open(fileobj=buffer, mode="w:xz") as bundle:
+            member = tarfile.TarInfo(f"{asset_root}/{binary}")
+            member.size = 6
+            bundle.addfile(member, io.BytesIO(b"binary"))
     archive = buffer.getvalue()
 
     def download(url, destination):
-        assert "/v1.3.0/" in url
+        assert url.endswith(f"/v1.3.0/{asset}") or url.endswith(f"/v1.3.0/{asset}.sha256")
         if problem == "download":
             raise OSError("download failed")
         if url.endswith(".sha256"):
@@ -73,8 +81,8 @@ def test_install_and_cleanup(tmp_path, problem):
         else:
             destination.write_bytes(archive)
 
-    with patch.object(installer.platform, "system", return_value="Linux"), \
-         patch.object(installer.platform, "machine", return_value="x86_64"), \
+    with patch.object(installer.platform, "system", return_value=system), \
+         patch.object(installer.platform, "machine", return_value=machine), \
          patch.object(installer, "download", side_effect=download), \
          patch.object(installer.subprocess, "run", return_value=subprocess.CompletedProcess(
              [], 0, "trellis 1.2.0" if problem == "version" else "trellis 1.3.0", "")):
@@ -85,6 +93,7 @@ def test_install_and_cleanup(tmp_path, problem):
         else:
             version, path = installer.install("v1.3.0", tmp_path)
             assert version == "1.3.0"
+            assert path.name == binary
             assert path.read_bytes() == b"binary"
 
 

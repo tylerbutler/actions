@@ -34,7 +34,9 @@ your checkout. There is no latest-version or source-build fallback.
 ```
 
 Supported binaries: Linux GNU x86_64/aarch64, macOS x86_64/aarch64, and Windows
-x86_64. Unsupported platforms and unavailable releases fail. You own checkout
+x86_64. Windows ZIP releases contain `trellis.exe` at the archive root; Linux
+and macOS tarballs contain the binary under the asset directory.
+Unsupported platforms and unavailable releases fail. You own checkout
 and Gleam/BEAM/Node setup; this action installs only trellis.
 
 ### trellis-workspace

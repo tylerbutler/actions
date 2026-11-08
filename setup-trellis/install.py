@@ -56,7 +56,7 @@ def extract(archive: Path, asset_root: str, binary: str, destination: Path) -> N
     member_name = f"{asset_root}/{binary}"
     if archive.suffix == ".zip":
         with zipfile.ZipFile(archive) as bundle:
-            with bundle.open(member_name) as source, destination.open("wb") as out:
+            with bundle.open(binary) as source, destination.open("wb") as out:
                 shutil.copyfileobj(source, out)
     else:
         with tarfile.open(archive) as bundle:
