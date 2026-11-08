@@ -113,32 +113,185 @@ on:
         required: false
         type: string
         default: ''
+      trellis_version:
+        description: 'Exact trellis version; empty preserves legacy workspace.toml CI'
+        type: string
+        default: ''
+      since:
+        description: 'Opt-in trellis affected selection base ref/SHA; requires history'
+        type: string
+        default: ''
+      trellis_task:
+        description: 'Configured trellis task for each selected package; replaces standard checks by default'
+        type: string
+        default: ''
+      trellis_task_with_checks:
+        description: 'Run standard checks and custom-command in addition to trellis_task'
+        type: boolean
+        default: false
+      trellis_check:
+        description: 'Run trellis doctor in a separate read-only check job'
+        type: boolean
+        default: false
+      trellis_changelog:
+        description: 'Also check changelog; requires trellis_check and explicit base/head'
+        type: boolean
+        default: false
+      trellis_base:
+        description: 'Explicit changelog comparison base ref/SHA'
+        type: string
+        default: ''
+      trellis_head:
+        description: 'Explicit changelog comparison head ref/SHA'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
 
 jobs:
   discover:
     runs-on: ${{ inputs.runs-on }}
     outputs:
       packages-json: ${{ steps.workspace.outputs.packages-json }}
+      matrix: ${{ steps.selection.outputs.matrix }}
+      has-packages: ${{ steps.selection.outputs.has_packages }}
+      run-checks: ${{ steps.selection.outputs.run_checks }}
     steps:
+      - name: Validate workspace mode
+        shell: bash
+        env:
+          TRELLIS_VERSION: ${{ inputs.trellis_version }}
+          SINCE: ${{ inputs.since }}
+          TASK: ${{ inputs.trellis_task }}
+          WITH_CHECKS: ${{ inputs.trellis_task_with_checks }}
+          CHECK: ${{ inputs.trellis_check }}
+          CHANGELOG: ${{ inputs.trellis_changelog }}
+          BASE: ${{ inputs.trellis_base }}
+          HEAD: ${{ inputs.trellis_head }}
+          WORKSPACE_FILE: ${{ inputs.workspace-file }}
+          CUSTOM_COMMAND: ${{ inputs.custom-command }}
+        run: |
+          # script: validate-mode
+          python3 - <<'PY'
+          import os
+          def reject(message):
+              raise SystemExit("::error::" + message)
+          enabled = bool(os.environ["TRELLIS_VERSION"])
+          task = os.environ["TASK"]
+          both = os.environ["WITH_CHECKS"] == "true"
+          check = os.environ["CHECK"] == "true"
+          changelog = os.environ["CHANGELOG"] == "true"
+          if not enabled and (task or both or check or changelog or os.environ["SINCE"]
+                              or os.environ["BASE"] or os.environ["HEAD"]):
+              reject("trellis-specific settings require an explicit trellis_version")
+          if enabled and os.environ["WORKSPACE_FILE"] not in ("", "workspace.toml"):
+              reject("workspace-file overrides are ambiguous in trellis mode")
+          if task.startswith("-"):
+              reject("trellis_task must not start with '-'")
+          if both and not task:
+              reject("trellis_task_with_checks requires a task")
+          if task and os.environ["CUSTOM_COMMAND"] and not both:
+              reject("custom-command with trellis_task requires trellis_task_with_checks")
+          if changelog and (not check or not os.environ["BASE"] or not os.environ["HEAD"]):
+              reject("trellis_changelog requires trellis_check and explicit trellis_base/trellis_head")
+          if (os.environ["BASE"] or os.environ["HEAD"]) and not changelog:
+              reject("changelog refs require trellis_changelog")
+          PY
+          # end-script
+
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # ratchet:actions/checkout@v7
+        with:
+          fetch-depth: ${{ inputs.trellis_version != '' && '0' || '1' }}
 
       - name: Read workspace
+        if: inputs.trellis_version == ''
         id: workspace
         uses: tylerbutler/actions/read-gleam-workspace@c3de10f5c576265f4910698528d949179081f25b # ratchet:tylerbutler/actions/read-gleam-workspace@main
         with:
           working-directory: ${{ inputs.working-directory }}
           workspace-file: ${{ inputs.workspace-file }}
 
+      - name: Install trellis
+        if: inputs.trellis_version != ''
+        uses: tylerbutler/actions/setup-trellis@8d40d48efe9c0a86eafe5f431ebb026ba4b163a2 # ratchet:tylerbutler/actions/setup-trellis@main
+        with:
+          version: ${{ inputs.trellis_version }}
+
+      - name: Discover trellis workspace
+        if: inputs.trellis_version != ''
+        id: trellis
+        uses: tylerbutler/actions/trellis-workspace@8d40d48efe9c0a86eafe5f431ebb026ba4b163a2 # ratchet:tylerbutler/actions/trellis-workspace@main
+        with:
+          working_directory: ${{ inputs.working-directory }}
+          since: ${{ inputs.since }}
+
+      - name: Select matrix
+        id: selection
+        shell: bash
+        env:
+          TRELLIS_VERSION: ${{ inputs.trellis_version }}
+          TRELLIS_MATRIX: ${{ steps.trellis.outputs.matrix }}
+          LEGACY_PACKAGES: ${{ steps.workspace.outputs.packages-json }}
+          TASK: ${{ inputs.trellis_task }}
+          WITH_CHECKS: ${{ inputs.trellis_task_with_checks }}
+        run: |
+          # script: select-matrix
+          python3 - <<'PY'
+          import json, os
+          if os.environ["TRELLIS_VERSION"]:
+              packages = json.loads(os.environ["TRELLIS_MATRIX"])["include"]
+          else:
+              packages = json.loads(os.environ["LEGACY_PACKAGES"])
+          if not isinstance(packages, list) or any(
+              not isinstance(p, dict) or any(not isinstance(p.get(k), str)
+              for k in ("name", "path", "version")) for p in packages
+          ):
+              raise SystemExit("::error::invalid selected workspace matrix")
+          checks = not os.environ["TASK"] or os.environ["WITH_CHECKS"] == "true"
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write("matrix=" + json.dumps({"package": packages}) + "\n")
+              out.write("has_packages=" + str(bool(packages)).lower() + "\n")
+              out.write("run_checks=" + str(checks).lower() + "\n")
+          PY
+          # end-script
+
+  trellis-check:
+    needs: discover
+    if: inputs.trellis_version != '' && inputs.trellis_check
+    runs-on: ${{ inputs.runs-on }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: tylerbutler/actions/setup-trellis@8d40d48efe9c0a86eafe5f431ebb026ba4b163a2 # ratchet:tylerbutler/actions/setup-trellis@main
+        with:
+          version: ${{ inputs.trellis_version }}
+      - uses: tylerbutler/actions/trellis-check@8d40d48efe9c0a86eafe5f431ebb026ba4b163a2 # ratchet:tylerbutler/actions/trellis-check@main
+        with:
+          working_directory: ${{ inputs.working-directory }}
+          check_changelog: ${{ inputs.trellis_changelog }}
+          base: ${{ inputs.trellis_base }}
+          head: ${{ inputs.trellis_head }}
+
   ci:
     needs: discover
+    if: needs.discover.outputs.has-packages == 'true'
     runs-on: ${{ inputs.runs-on }}
     strategy:
       fail-fast: ${{ inputs.fail-fast }}
-      matrix:
-        package: ${{ fromJson(needs.discover.outputs.packages-json) }}
+      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
     name: ${{ matrix.package.name }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # ratchet:actions/checkout@v7
+        with:
+          fetch-depth: ${{ inputs.trellis_version != '' && '0' || '1' }}
+
+      - name: Install matrix trellis
+        if: inputs.trellis_version != ''
+        uses: tylerbutler/actions/setup-trellis@8d40d48efe9c0a86eafe5f431ebb026ba4b163a2 # ratchet:tylerbutler/actions/setup-trellis@main
+        with:
+          version: ${{ inputs.trellis_version }}
 
       - name: Cache Gleam dependencies
         if: inputs.cache
@@ -194,7 +347,7 @@ jobs:
             fi
 
       - name: Format check
-        if: inputs.format-check
+        if: needs.discover.outputs.run-checks == 'true' && inputs.format-check
         uses: tylerbutler/actions/run-gleam-workspace@c3de10f5c576265f4910698528d949179081f25b # ratchet:tylerbutler/actions/run-gleam-workspace@main
         with:
           working-directory: ${{ inputs.working-directory }}
@@ -202,7 +355,7 @@ jobs:
           command: gleam format --check src test
 
       - name: Type check
-        if: inputs.check
+        if: needs.discover.outputs.run-checks == 'true' && inputs.check
         uses: tylerbutler/actions/run-gleam-workspace@c3de10f5c576265f4910698528d949179081f25b # ratchet:tylerbutler/actions/run-gleam-workspace@main
         with:
           working-directory: ${{ inputs.working-directory }}
@@ -210,7 +363,7 @@ jobs:
           command: gleam check
 
       - name: Build (warnings as errors)
-        if: inputs.build-strict
+        if: needs.discover.outputs.run-checks == 'true' && inputs.build-strict
         uses: tylerbutler/actions/run-gleam-workspace@c3de10f5c576265f4910698528d949179081f25b # ratchet:tylerbutler/actions/run-gleam-workspace@main
         with:
           working-directory: ${{ inputs.working-directory }}
@@ -218,7 +371,7 @@ jobs:
           command: gleam build --warnings-as-errors
 
       - name: Test
-        if: inputs.test
+        if: needs.discover.outputs.run-checks == 'true' && inputs.test
         uses: tylerbutler/actions/run-gleam-workspace@c3de10f5c576265f4910698528d949179081f25b # ratchet:tylerbutler/actions/run-gleam-workspace@main
         with:
           working-directory: ${{ inputs.working-directory }}
@@ -226,7 +379,7 @@ jobs:
           command: gleam test
 
       - name: Test (JavaScript)
-        if: inputs.test-js
+        if: needs.discover.outputs.run-checks == 'true' && inputs.test-js
         uses: tylerbutler/actions/run-gleam-workspace@c3de10f5c576265f4910698528d949179081f25b # ratchet:tylerbutler/actions/run-gleam-workspace@main
         with:
           working-directory: ${{ inputs.working-directory }}
@@ -234,7 +387,7 @@ jobs:
           command: gleam test --target javascript
 
       - name: Docs
-        if: inputs.docs
+        if: needs.discover.outputs.run-checks == 'true' && inputs.docs
         uses: tylerbutler/actions/run-gleam-workspace@c3de10f5c576265f4910698528d949179081f25b # ratchet:tylerbutler/actions/run-gleam-workspace@main
         with:
           working-directory: ${{ inputs.working-directory }}
@@ -242,9 +395,24 @@ jobs:
           command: gleam docs build
 
       - name: "${{ inputs.custom-command }}"
-        if: inputs.custom-command != ''
+        if: needs.discover.outputs.run-checks == 'true' && inputs.custom-command != ''
         uses: tylerbutler/actions/run-gleam-workspace@c3de10f5c576265f4910698528d949179081f25b # ratchet:tylerbutler/actions/run-gleam-workspace@main
         with:
           working-directory: ${{ inputs.working-directory }}
           packages: ${{ matrix.package.path }}
           command: ${{ inputs.custom-command }}
+
+      - name: Run configured trellis task
+        if: inputs.trellis_task != ''
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          TASK: ${{ inputs.trellis_task }}
+          PACKAGE: ${{ matrix.package.name }}
+        run: |
+          # script: run-task
+          python3 - <<'PY'
+          import os, subprocess
+          subprocess.run(["trellis", "run", os.environ["TASK"], os.environ["PACKAGE"]], check=True)
+          PY
+          # end-script

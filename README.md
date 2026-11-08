@@ -300,6 +300,40 @@ alternative can publish from exact package-tag events using `trellis-publish`
 with `tag`; it requires matching approved checkouts and does not use this
 publish-then-tag coordinator.
 
+### Gleam workspace CI with trellis
+
+The existing `gleam-workspace-ci.yml` retains its kebab-case inputs and legacy
+workspace.toml path when `trellis_version` is empty. An exact version enables
+trellis discovery; no workspace.toml is required. A nondefault `workspace-file`
+override in trellis mode fails instead of guessing which format you intended.
+
+```yaml
+jobs:
+  ci:
+    uses: tylerbutler/actions/.github/workflows/gleam-workspace-ci.yml@main
+    with:
+      working-directory: gleam
+      trellis_version: '1.3.0'
+      trellis_task: ci
+      trellis_check: true
+      trellis_changelog: true
+      trellis_base: ${{ github.event.pull_request.base.sha }}
+      trellis_head: ${{ github.event.pull_request.head.sha }}
+```
+
+Define `ci` in your workspace tasks; the workflow does not invent a configured
+task name. It runs `trellis run <task> <selected-package>` from the workspace
+directory and installs trellis in each job that uses it. A task replaces standard
+checks by default; set `trellis_task_with_checks: true` to run both, including any
+`custom-command`. Runtime/toolchain/cache options and explicit dependency
+installation retain their meaning.
+
+Selection defaults to all packages. Set `since` to an explicit comparison ref/SHA
+for affected selection with dependents. Trellis-mode checkouts fetch full history;
+ensure the requested refs exist. Empty selection skips the matrix job, while
+enabled diagnostics still run. `trellis_check` enables doctor; `trellis_changelog`
+also requires explicit base/head. Checks use read-only permissions for fork PRs.
+
 ### setup-licence-audit
 
 Install the released `licence_audit` escript and optionally set up Erlang/OTP.
