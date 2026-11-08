@@ -36,6 +36,14 @@ on:
         description: Required for Hex or mixed publication
         type: string
         default: ''
+      sbom_package:
+        description: Root Hex package to generate and attach a CycloneDX SBOM for; empty disables
+        type: string
+        default: ''
+      licence_audit_version:
+        description: Exact native licence_audit release version; required with sbom_package
+        type: string
+        default: ''
     secrets:
       app_id:
         required: true
@@ -72,6 +80,8 @@ jobs:
         env:
           GLEAM_VERSION: ${{ inputs.gleam_version }}
           ERLANG_VERSION: ${{ inputs.erlang_version }}
+          SBOM_PACKAGE: ${{ inputs.sbom_package }}
+          LICENCE_AUDIT_VERSION: ${{ inputs.licence_audit_version }}
         with:
           github-token: ${{ secrets.publication_token || github.token }}
           script: |
@@ -87,6 +97,14 @@ jobs:
             await exec.getExecOutput("git", ["check-ref-format", "--branch", branch]);
             if (mode !== "git_only" && (!process.env.GLEAM_VERSION || !process.env.ERLANG_VERSION)) {
               throw new Error("Hex/mixed publication requires gleam_version and erlang_version.");
+            }
+            if (process.env.SBOM_PACKAGE) {
+              if (mode === "git_only" || !/^[a-z][a-z0-9_]*$/.test(process.env.SBOM_PACKAGE)) {
+                throw new Error("sbom_package requires a root Hex package name and hex/mixed mode.");
+              }
+              if (!/^\d+\.\d+\.\d+$/.test(process.env.LICENCE_AUDIT_VERSION || "")) {
+                throw new Error("SBOM generation requires an exact licence_audit_version.");
+              }
             }
             const sameRepo = pr => pr.head.ref === branch && pr.base.ref === base
               && pr.head.repo?.full_name === `${repo.owner}/${repo.repo}`
@@ -195,6 +213,124 @@ jobs:
           cache: 'false'
           tools: ''
 
+      - name: Select SBOM package and exact tag
+        id: sbom
+        if: steps.select.outputs.publish_sha != '' && inputs.sbom_package != ''
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # ratchet:actions/github-script@v9
+        env:
+          SBOM_PACKAGE: ${{ inputs.sbom_package }}
+        with:
+          script: |
+            // script: sbom-select
+            const name = process.env.SBOM_PACKAGE;
+            const read = async args => JSON.parse((await exec.getExecOutput("trellis", args, {
+              cwd: process.env.WORKING_DIRECTORY,
+            })).stdout);
+            const list = await read(["list", "--releasable", "--json"]);
+            if (list.schema !== "trellis.list/1" || !Array.isArray(list.packages)) {
+              throw new Error("Invalid Trellis package contract.");
+            }
+            const packages = list.packages.filter(p => p.name === name);
+            if (packages.length !== 1 || packages[0].path !== "." || packages[0].lifecycle !== "hex"
+                || packages[0].releasable !== true || typeof packages[0].version !== "string") {
+              throw new Error("sbom_package must select the root releasable Hex package.");
+            }
+            const version = packages[0].version;
+            if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version)) {
+              throw new Error("Invalid SBOM package version.");
+            }
+            const plan = await read(["tag", "plan", "--json"]);
+            if (plan.schema !== "trellis.tag_plan/2" || !Array.isArray(plan.tags)) {
+              throw new Error("Invalid Trellis tag contract.");
+            }
+            const tags = plan.tags.filter(t => t.name === name && t.version === version && t.kind === "exact");
+            if (tags.length !== 1 || !/^[0-9A-Za-z][0-9A-Za-z._+-]*$/.test(tags[0].tag)) {
+              throw new Error("SBOM requires one exact tag with a filename-safe name.");
+            }
+            core.setOutput("version", version);
+            core.setOutput("tag", tags[0].tag);
+            core.setOutput("path", `priv/${name}.cdx.json`);
+            core.setOutput("asset", `${tags[0].tag}.cdx.json`);
+            // end-script
+
+      - name: Install native licence_audit
+        if: steps.select.outputs.publish_sha != '' && inputs.sbom_package != ''
+        shell: bash
+        env:
+          LICENCE_AUDIT_VERSION: ${{ inputs.licence_audit_version }}
+        run: |
+          directory=$(mktemp -d "$RUNNER_TEMP/licence-audit.XXXXXX")
+          archive="licence_audit-v${LICENCE_AUDIT_VERSION}-x86_64-linux-glibc.tar.gz"
+          base="https://github.com/tylerbutler/licence_audit/releases/download/v${LICENCE_AUDIT_VERSION}"
+          curl --fail --silent --show-error --location "$base/$archive" -o "$directory/$archive"
+          curl --fail --silent --show-error --location "$base/checksums.txt" -o "$directory/checksums.txt"
+          awk -v archive="$archive" '$2 == archive { print }' "$directory/checksums.txt" > "$directory/selected.sha256"
+          test "$(wc -l < "$directory/selected.sha256")" -eq 1
+          (cd "$directory" && sha256sum --check --strict selected.sha256)
+          tar -xOzf "$directory/$archive" "${archive%.tar.gz}/licence_audit" > "$directory/licence_audit"
+          chmod +x "$directory/licence_audit"
+          "$directory/licence_audit" --version | grep -Fx "$LICENCE_AUDIT_VERSION"
+          echo "$directory" >> "$GITHUB_PATH"
+
+      - name: Generate and verify package SBOM
+        id: generate_sbom
+        if: steps.select.outputs.publish_sha != '' && inputs.sbom_package != ''
+        shell: bash
+        working-directory: ${{ inputs.working_directory }}
+        env:
+          RELEASE_SHA: ${{ steps.select.outputs.publish_sha }}
+          SBOM_PACKAGE: ${{ inputs.sbom_package }}
+          SBOM_VERSION: ${{ steps.sbom.outputs.version }}
+          SBOM_PATH: ${{ steps.sbom.outputs.path }}
+          SBOM_ASSET: ${{ steps.sbom.outputs.asset }}
+          SOURCE_DATE_EPOCH: '0'
+        run: |
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          git ls-files --error-unmatch gleam.toml manifest.toml
+          git diff --exit-code HEAD
+          gleam deps download
+          git diff --exit-code HEAD
+          mkdir -p priv
+          licence_audit sbom --reproducible --output="$SBOM_PATH"
+          python3 - <<'PY'
+          import json, os, tomllib
+          from pathlib import Path
+          document = json.loads(Path(os.environ["SBOM_PATH"]).read_text())
+          manifest = tomllib.loads(Path("manifest.toml").read_text())
+          project = tomllib.loads(Path("gleam.toml").read_text())
+          name, version = os.environ["SBOM_PACKAGE"], os.environ["SBOM_VERSION"]
+          if project.get("name") != name or project.get("version") != version:
+              raise ValueError("SBOM package does not match the approved manifest")
+          if document.get("bomFormat") != "CycloneDX" or document.get("specVersion") != "1.6":
+              raise ValueError("Expected CycloneDX 1.6")
+          root = document.get("metadata", {}).get("component", {})
+          if root.get("name") != name or root.get("version") != version:
+              raise ValueError("SBOM root identity mismatch")
+          locked = {p["name"]: p for p in manifest["packages"]}
+          components = document.get("components", [])
+          if len(components) != len(locked) or {p["name"] for p in components} != set(locked):
+              raise ValueError("SBOM must include the complete lock inventory")
+          required, pending = set(), list(project.get("dependencies", {}))
+          while pending:
+              dependency = pending.pop()
+              if dependency not in required:
+                  required.add(dependency)
+                  pending.extend(locked[dependency].get("requirements", []))
+          for component in components:
+              package = locked[component["name"]]
+              scope = "required" if component["name"] in required else "optional"
+              if component.get("version") != package["version"] or component.get("scope") != scope:
+                  raise ValueError("SBOM locked version or dependency scope mismatch")
+          PY
+          gleam export hex-tarball
+          tar -xOf "build/${SBOM_PACKAGE}-${SBOM_VERSION}.tar" contents.tar.gz |
+            tar -xzOf - "$SBOM_PATH" | cmp "$SBOM_PATH" -
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          git diff --exit-code HEAD
+          directory=$(mktemp -d "$RUNNER_TEMP/trellis-sbom.XXXXXX")
+          cp "$SBOM_PATH" "$directory/$SBOM_ASSET"
+          echo "snapshot=$directory/$SBOM_ASSET" >> "$GITHUB_OUTPUT"
+
       - name: Publish Hex members
         id: publish
         if: steps.select.outputs.publish_sha != '' && inputs.release_mode != 'git_only'
@@ -208,6 +344,22 @@ jobs:
             exit 1
           fi
           trellis publish --all-untagged
+
+      - name: Verify published Hex SBOM
+        id: hex_sbom
+        if: steps.select.outputs.publish_sha != '' && inputs.sbom_package != ''
+        shell: bash
+        env:
+          SBOM_PACKAGE: ${{ inputs.sbom_package }}
+          SBOM_VERSION: ${{ steps.sbom.outputs.version }}
+          SBOM_PATH: ${{ steps.sbom.outputs.path }}
+          SBOM_SNAPSHOT: ${{ steps.generate_sbom.outputs.snapshot }}
+        run: |
+          directory=$(mktemp -d "$RUNNER_TEMP/hex-sbom.XXXXXX")
+          curl --fail --silent --show-error --location --retry 3 \
+            "https://repo.hex.pm/tarballs/${SBOM_PACKAGE}-${SBOM_VERSION}.tar" -o "$directory/package.tar"
+          tar -xOf "$directory/package.tar" contents.tar.gz |
+            tar -xzOf - "$SBOM_PATH" | cmp "$SBOM_SNAPSHOT" -
 
       - name: Tag approved release
         id: tag
@@ -224,6 +376,41 @@ jobs:
           GIT_CONFIG_VALUE_1: ${{ steps.reserve.outputs.git_header }}
         run: trellis tag create --push --github-release
 
+      - name: Reconcile GitHub Release SBOM
+        id: release_sbom
+        if: steps.select.outputs.publish_sha != '' && inputs.sbom_package != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.publication_token || github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_SHA: ${{ steps.select.outputs.publish_sha }}
+          SBOM_TAG: ${{ steps.sbom.outputs.tag }}
+          SBOM_ASSET: ${{ steps.sbom.outputs.asset }}
+          SBOM_SNAPSHOT: ${{ steps.generate_sbom.outputs.snapshot }}
+          GIT_CONFIG_COUNT: '2'
+          GIT_CONFIG_KEY_0: http.${{ steps.reserve.outputs.git_origin }}.extraheader
+          GIT_CONFIG_VALUE_0: ''
+          GIT_CONFIG_KEY_1: http.${{ steps.reserve.outputs.git_origin }}.extraheader
+          GIT_CONFIG_VALUE_1: ${{ steps.reserve.outputs.git_header }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          git fetch --no-tags origin "refs/tags/$SBOM_TAG"
+          test "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$RELEASE_SHA"
+          directory=$(mktemp -d "$RUNNER_TEMP/release-sbom.XXXXXX")
+          gh release view "$SBOM_TAG" --json assets > "$directory/release.json"
+          count=$(jq --arg name "$SBOM_ASSET" '[.assets[] | select(.name == $name)] | length' "$directory/release.json")
+          if [[ "$count" = 0 ]]; then
+            gh release upload "$SBOM_TAG" "$SBOM_SNAPSHOT"
+          elif [[ "$count" != 1 ]]; then
+            echo "::error::Duplicate SBOM release assets"
+            exit 1
+          fi
+          gh release download "$SBOM_TAG" --pattern "$SBOM_ASSET" --dir "$directory"
+          if ! cmp "$SBOM_SNAPSHOT" "$directory/$SBOM_ASSET"; then
+            echo "::error::Release SBOM differs from the published Hex package; refusing overwrite"
+            exit 1
+          fi
+
       - name: Record publication outcome
         id: publication
         if: always() && steps.select.outputs.publish_sha != ''
@@ -232,16 +419,28 @@ jobs:
           RELEASE_SHA: ${{ steps.select.outputs.publish_sha }}
           TAG_OUTCOME: ${{ steps.tag.outcome }}
           PUBLISH_OUTCOME: ${{ steps.publish.outcome }}
+          SBOM_PACKAGE: ${{ inputs.sbom_package }}
+          GENERATE_SBOM_OUTCOME: ${{ steps.generate_sbom.outcome }}
+          HEX_SBOM_OUTCOME: ${{ steps.hex_sbom.outcome }}
+          RELEASE_SBOM_OUTCOME: ${{ steps.release_sbom.outcome }}
         with:
           github-token: ${{ secrets.publication_token || github.token }}
           script: |
             // script: publication-outcome
             const complete = process.env.TAG_OUTCOME === "success"
-              && (process.env.RELEASE_MODE === "git_only" || process.env.PUBLISH_OUTCOME === "success");
-            for (const [name, outcome] of [
+              && (process.env.RELEASE_MODE === "git_only" || process.env.PUBLISH_OUTCOME === "success")
+              && (!process.env.SBOM_PACKAGE || [process.env.GENERATE_SBOM_OUTCOME,
+                process.env.HEX_SBOM_OUTCOME, process.env.RELEASE_SBOM_OUTCOME].every(o => o === "success"));
+            const outcomes = [
               ["Trellis publish", process.env.PUBLISH_OUTCOME],
               ["Trellis tag", process.env.TAG_OUTCOME],
-            ]) {
+            ];
+            if (process.env.SBOM_PACKAGE) outcomes.push(
+              ["Package SBOM", process.env.GENERATE_SBOM_OUTCOME],
+              ["Published Hex SBOM", process.env.HEX_SBOM_OUTCOME],
+              ["Release SBOM", process.env.RELEASE_SBOM_OUTCOME],
+            );
+            for (const [name, outcome] of outcomes) {
               core.summary.addHeading(name, 2).addRaw(`Step outcome: \`${outcome || "not run"}\`.\n`);
             }
             await core.summary.write();
