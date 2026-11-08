@@ -208,6 +208,7 @@ preparation App credentials. Optional inputs: `working_directory`, `base`
 (`main`), `release_branch` (`release/pending`), `pre`, multiline `set`/`bump`.
 Hex/mixed publication also requires pinned `gleam_version`, `erlang_version`,
 and `hex_api_key`. Git-only needs no Hex key or runtime installation.
+Optional SBOM inputs: `sbom_package` and `licence_audit_version`.
 
 The coordinator invokes `trellis release pr --github-output`,
 `trellis publish --all-untagged`, and `trellis tag create --push --github-release`
@@ -263,6 +264,56 @@ For Git-only, use `release_mode: git_only` and omit the runtime inputs and Hex
 secret. Hex and mixed modes publish Hex members first, then tag all releasable
 members; workspace-only members have no release. Assemble Git-only artifacts in
 your own workflow. Do not add a second tag-triggered publisher to this recipe.
+
+#### Package SBOM
+
+To include a CycloneDX 1.6 document in a root Hex package and its GitHub Release,
+add these inputs to the release job:
+
+```yaml
+with:
+  sbom_package: shelf
+  licence_audit_version: '0.15.0'
+```
+
+Use an exact Actions revision that includes these inputs. The example revision
+in the full workflow above predates SBOM support.
+
+Set `sbom_package` to the root Gleam package name in `working_directory`.
+This option supports one root package in `hex` or `mixed` mode. Trellis must
+provide one exact release tag whose name contains letters, digits, `.`, `_`,
+`+`, or `-` and starts with a letter or digit. Leave `sbom_package` empty to
+retain the existing release behavior.
+The coordinator selects configured current tags through `trellis ci outputs`
+and resolves them through `trellis ci tag-package --json`, including tags that
+already exist after a partial release.
+
+The coordinator installs the checksum-verified native Linux licence_audit
+release specified by `licence_audit_version`, without a Hex dependency or an
+OTP-28 escript. It runs `gleam deps download`, then
+`licence_audit sbom --reproducible --output=priv/<package>.cdx.json` at the
+approved merge SHA with `SOURCE_DATE_EPOCH=0`. Commit `manifest.toml` and ignore
+the generated document. Generation receives no Hex, publication, or preparation
+credentials.
+
+Before publication, the coordinator checks the document's root identity,
+complete locked dependency inventory, versions, and scopes. Production
+dependencies and their transitive dependencies are required; dev-only
+dependencies are optional. It checks the exported Hex tarball for the same
+document bytes, then runs the existing Trellis publisher.
+
+After publication, the coordinator downloads the published Hex tarball and
+compares its document with the generated snapshot. It reconciles tags through
+Trellis, checks that the package's exact remote tag points to the approved SHA,
+and uses `gh release upload` to attach `<exact-tag>.cdx.json`. An existing asset
+must have the same bytes; a mismatch fails without overwrite.
+
+Generation, Hex byte verification, and release attachment must succeed before
+the coordinator marks the release complete or prepares the next release PR.
+Recover a failed run at its approved merge SHA. Trellis skips versions already
+on Hex and reconciles existing tags; the asset step accepts an identical asset
+without another upload. A mismatch with an existing Hex document or release
+asset requires investigation rather than replacement.
 
 The App needs Contents, Pull requests, and Commit statuses read/write on this
 repository. Preparation uses its installation token to trigger ordinary CI.
