@@ -214,14 +214,14 @@ jobs:
 
       - name: Install trellis
         if: inputs.trellis_version != ''
-        uses: tylerbutler/actions/setup-trellis@8d40d48efe9c0a86eafe5f431ebb026ba4b163a2 # ratchet:tylerbutler/actions/setup-trellis@main
+        uses: tylerbutler/actions/setup-trellis@a3fb247ca6dd1ebfa060e9f373178f68333086fd # ratchet:tylerbutler/actions/setup-trellis@main
         with:
           version: ${{ inputs.trellis_version }}
 
       - name: Discover trellis workspace
         if: inputs.trellis_version != ''
         id: trellis
-        uses: tylerbutler/actions/trellis-workspace@8d40d48efe9c0a86eafe5f431ebb026ba4b163a2 # ratchet:tylerbutler/actions/trellis-workspace@main
+        uses: tylerbutler/actions/trellis-workspace@a3fb247ca6dd1ebfa060e9f373178f68333086fd # ratchet:tylerbutler/actions/trellis-workspace@main
         with:
           working_directory: ${{ inputs.working-directory }}
           since: ${{ inputs.since }}
@@ -264,10 +264,10 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: tylerbutler/actions/setup-trellis@8d40d48efe9c0a86eafe5f431ebb026ba4b163a2 # ratchet:tylerbutler/actions/setup-trellis@main
+      - uses: tylerbutler/actions/setup-trellis@a3fb247ca6dd1ebfa060e9f373178f68333086fd # ratchet:tylerbutler/actions/setup-trellis@main
         with:
           version: ${{ inputs.trellis_version }}
-      - uses: tylerbutler/actions/trellis-check@8d40d48efe9c0a86eafe5f431ebb026ba4b163a2 # ratchet:tylerbutler/actions/trellis-check@main
+      - uses: tylerbutler/actions/trellis-check@a3fb247ca6dd1ebfa060e9f373178f68333086fd # ratchet:tylerbutler/actions/trellis-check@main
         with:
           working_directory: ${{ inputs.working-directory }}
           check_changelog: ${{ inputs.trellis_changelog }}
@@ -289,7 +289,7 @@ jobs:
 
       - name: Install matrix trellis
         if: inputs.trellis_version != ''
-        uses: tylerbutler/actions/setup-trellis@8d40d48efe9c0a86eafe5f431ebb026ba4b163a2 # ratchet:tylerbutler/actions/setup-trellis@main
+        uses: tylerbutler/actions/setup-trellis@a3fb247ca6dd1ebfa060e9f373178f68333086fd # ratchet:tylerbutler/actions/setup-trellis@main
         with:
           version: ${{ inputs.trellis_version }}
 

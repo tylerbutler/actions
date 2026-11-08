@@ -150,7 +150,7 @@ jobs:
 
       - name: Install publication trellis
         if: steps.select.outputs.publish_sha != ''
-        uses: tylerbutler/actions/setup-trellis@8d40d48efe9c0a86eafe5f431ebb026ba4b163a2 # ratchet:tylerbutler/actions/setup-trellis@main
+        uses: tylerbutler/actions/setup-trellis@a3fb247ca6dd1ebfa060e9f373178f68333086fd # ratchet:tylerbutler/actions/setup-trellis@main
         with:
           version: ${{ inputs.trellis_version }}
 
@@ -174,7 +174,7 @@ jobs:
 
       - name: Setup Hex runtime
         if: steps.select.outputs.publish_sha != '' && inputs.release_mode != 'git_only'
-        uses: tylerbutler/actions/setup-gleam@8d40d48efe9c0a86eafe5f431ebb026ba4b163a2 # ratchet:tylerbutler/actions/setup-gleam@main
+        uses: tylerbutler/actions/setup-gleam@a3fb247ca6dd1ebfa060e9f373178f68333086fd # ratchet:tylerbutler/actions/setup-gleam@main
         with:
           version-file: ''
           gleam-version: ${{ inputs.gleam_version }}
@@ -187,7 +187,7 @@ jobs:
       - name: Publish Hex members
         id: publish
         if: steps.select.outputs.publish_sha != '' && inputs.release_mode != 'git_only'
-        uses: tylerbutler/actions/trellis-publish@8d40d48efe9c0a86eafe5f431ebb026ba4b163a2 # ratchet:tylerbutler/actions/trellis-publish@main
+        uses: tylerbutler/actions/trellis-publish@a3fb247ca6dd1ebfa060e9f373178f68333086fd # ratchet:tylerbutler/actions/trellis-publish@main
         with:
           working_directory: ${{ inputs.working_directory }}
           all_untagged: 'true'
@@ -196,7 +196,7 @@ jobs:
       - name: Tag approved release
         id: tag
         if: steps.select.outputs.publish_sha != ''
-        uses: tylerbutler/actions/trellis-tag@8d40d48efe9c0a86eafe5f431ebb026ba4b163a2 # ratchet:tylerbutler/actions/trellis-tag@main
+        uses: tylerbutler/actions/trellis-tag@a3fb247ca6dd1ebfa060e9f373178f68333086fd # ratchet:tylerbutler/actions/trellis-tag@main
         with:
           working_directory: ${{ inputs.working_directory }}
           push: 'true'
@@ -246,7 +246,7 @@ jobs:
 
       - name: Install preparation trellis
         if: steps.select.outputs.prepare == 'true' || steps.publication.outputs.complete == 'true'
-        uses: tylerbutler/actions/setup-trellis@8d40d48efe9c0a86eafe5f431ebb026ba4b163a2 # ratchet:tylerbutler/actions/setup-trellis@main
+        uses: tylerbutler/actions/setup-trellis@a3fb247ca6dd1ebfa060e9f373178f68333086fd # ratchet:tylerbutler/actions/setup-trellis@main
         with:
           version: ${{ inputs.trellis_version }}
 
@@ -361,7 +361,7 @@ jobs:
       - name: Prepare release PR
         id: prepare
         if: steps.gate.outputs.prepare == 'true'
-        uses: tylerbutler/actions/trellis-release-pr@8d40d48efe9c0a86eafe5f431ebb026ba4b163a2 # ratchet:tylerbutler/actions/trellis-release-pr@main
+        uses: tylerbutler/actions/trellis-release-pr@a3fb247ca6dd1ebfa060e9f373178f68333086fd # ratchet:tylerbutler/actions/trellis-release-pr@main
         with:
           working_directory: ${{ inputs.working_directory }}
           base: ${{ inputs.base }}
