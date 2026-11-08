@@ -12,12 +12,13 @@ const pr = (extra = {}) => ({
 
 async function run(name, options = {}) {
   const source = workflow.match(new RegExp(`// script: ${name}\\n([\\s\\S]*?)// end-script`))[1];
-  const outputs = {}, writes = [], commands = [];
+  const outputs = {}, writes = [], commands = [], commandEnvs = [];
   const context = {repo: {owner: "example", repo: "repo"}, eventName: options.event || "push",
-    ref: options.ref || "refs/heads/main", payload: {action: "closed", pull_request: options.eventPr || pr()}};
+    ref: options.ref || "refs/heads/main", serverUrl: "https://github.com",
+    payload: {action: "closed", pull_request: options.eventPr || pr()}};
   const env = {RELEASE_BASE: "main", RELEASE_BRANCH: "release/pending", RELEASE_MODE: options.mode || "hex",
     GLEAM_VERSION: "1.13.0", ERLANG_VERSION: "28", WORKING_DIRECTORY: ".", RELEASE_SHA: SHA,
-    ...options.env};
+    PREPARATION_TOKEN: "test-token", ...options.env};
   const rest = {
     git: {getRef: async () => ({data: {object: {sha: options.baseSha || SHA}}})},
     pulls: {get: async () => ({data: options.pr || pr()}), list: "pulls"},
@@ -35,20 +36,22 @@ async function run(name, options = {}) {
   paginate.iterator = async function* () { yield {data: (options.commits || [SHA]).map(sha => ({sha}))}; };
   let pending = false;
   const exec = {
-    exec: async (command, args) => {
+    exec: async (command, args, options = {}) => {
       commands.push([command, ...args]);
+      commandEnvs.push(options.env);
       if (args[0] === "checkout") pending = args[1] === "--detach";
     },
     getExecOutput: async (command, args) => {
       commands.push([command, ...args]);
+      if (args[0] === "remote") return {stdout: "https://github.com/example/repo"};
       if (command === "git") return {stdout: options.checkout || SHA};
       return {stdout: JSON.stringify({packages: [{version: pending ?
         options.pendingVersion || "1.0.0" : options.version || "1.0.0"}]})};
     },
   };
   await new AsyncFunction("github", "context", "core", "exec", "process", source)(
-    {rest, paginate}, context, {setOutput: (k,v) => outputs[k] = v, info: () => {}}, exec, {env});
-  return {outputs, writes, commands};
+    {rest, paginate}, context, {setOutput: (k,v) => outputs[k] = v, info: () => {}, setSecret: () => {}}, exec, {env});
+  return {outputs, writes, commands, commandEnvs};
 }
 
 async function tests() {
@@ -113,6 +116,14 @@ async function tests() {
   const candidate = await run("prepare-gate", {statuses: success, open: [pr()], pendingVersion: "1.1.0-rc.0"});
   assert.deepEqual(candidate.outputs, {});
   assert(candidate.commands.some(c => c.join(" ") === "git checkout main"));
+  const authenticatedFetch = candidate.commandEnvs.find(env => env?.GIT_CONFIG_COUNT);
+  assert.equal(authenticatedFetch.GIT_CONFIG_COUNT, "2");
+  assert.equal(authenticatedFetch.GIT_CONFIG_KEY_1, "http.https://github.com/example/repo.extraheader");
+  assert.equal(authenticatedFetch.GIT_CONFIG_VALUE_0, "");
+  assert.equal(authenticatedFetch.GIT_CONFIG_VALUE_1,
+    "AUTHORIZATION: basic " + Buffer.from("x-access-token:test-token").toString("base64"));
+  await assert.rejects(run("prepare-gate", {statuses: success, open: [pr()],
+    env: {PREPARATION_TOKEN: ""}}), /preparation token/);
   const retry = await run("prepare-gate", {event: "workflow_dispatch", statuses: reservation, commits: [OLD, SHA]});
   assert.deepEqual(JSON.parse(retry.outputs.reservation_shas), [OLD, SHA]);
   const noop = await run("clear-noop", {env: {RESERVATION_SHAS: JSON.stringify([OLD, SHA])}, open: []});

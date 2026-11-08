@@ -254,6 +254,8 @@ jobs:
         id: gate
         if: steps.select.outputs.prepare == 'true' || steps.publication.outputs.complete == 'true'
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # ratchet:actions/github-script@v8
+        env:
+          PREPARATION_TOKEN: ${{ steps.app.outputs.token }}
         with:
           github-token: ${{ steps.app.outputs.token }}
           script: |
@@ -316,7 +318,23 @@ jobs:
               if (candidate(await versions())) { core.info("Candidate base requires a manual request."); return; }
               if (open[0]) {
                 if (!/^[0-9a-f]{40}$/.test(open[0].head.sha)) throw new Error("Invalid pending head SHA.");
-                await exec.exec("git", ["fetch", "origin", open[0].head.sha]);
+                const origin = (await exec.getExecOutput("git", ["remote", "get-url", "origin"])).stdout.trim();
+                const expected = `${context.serverUrl}/${repo.owner}/${repo.repo}`;
+                if (![expected, `${expected}.git`].includes(origin)) throw new Error("Unexpected checkout origin.");
+                const token = process.env.PREPARATION_TOKEN;
+                if (!token) throw new Error("Pending release fetch requires the preparation token.");
+                const header = "AUTHORIZATION: basic " + Buffer.from(`x-access-token:${token}`).toString("base64");
+                core.setSecret(header);
+                const gitEnv = {...process.env};
+                let count = Number(gitEnv.GIT_CONFIG_COUNT || "0");
+                if (!Number.isSafeInteger(count) || count < 0) throw new Error("Invalid Git config count.");
+                for (const value of ["", header]) {
+                  gitEnv[`GIT_CONFIG_KEY_${count}`] = `http.${origin}.extraheader`;
+                  gitEnv[`GIT_CONFIG_VALUE_${count}`] = value;
+                  count++;
+                }
+                gitEnv.GIT_CONFIG_COUNT = String(count);
+                await exec.exec("git", ["fetch", "origin", open[0].head.sha], {env: gitEnv});
                 let pendingCandidate;
                 try {
                   await exec.exec("git", ["checkout", "--detach", open[0].head.sha]);
