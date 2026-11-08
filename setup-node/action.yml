@@ -36,13 +36,13 @@ runs:
   steps:
     - name: Install tools
       if: inputs.tools != ''
-      uses: taiki-e/install-action@50414676f9f5d50a65992c6dd2ed02641263226c # ratchet:taiki-e/install-action@v2
+      uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # ratchet:taiki-e/install-action@v2
       with:
         tool: ${{ inputs.tools }}
 
     - name: Setup pnpm
       if: inputs.package-manager == 'pnpm'
-      uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # ratchet:pnpm/action-setup@v6
+      uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # ratchet:pnpm/action-setup@v6
       with:
         version: ${{ inputs.pnpm-version }}
 
@@ -53,7 +53,7 @@ runs:
         bun-version: latest
 
     - name: Setup Node.js
-      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # ratchet:actions/setup-node@v6
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # ratchet:actions/setup-node@v7
       with:
         node-version: ${{ inputs.node-version }}
         cache: ${{ inputs.cache == 'true' && inputs.package-manager || '' }}

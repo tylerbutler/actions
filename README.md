@@ -27,7 +27,7 @@ add its directory to the next step's `PATH`. `version` is required; `1.3.0` and
 your checkout. There is no latest-version or source-build fallback.
 
 ```yaml
-- uses: tylerbutler/actions/setup-trellis@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/setup-trellis@main
+- uses: tylerbutler/actions/setup-trellis@9d2a7c45ab9c7e04a3ac35445f187840f126ac47 # ratchet:tylerbutler/actions/setup-trellis@main
   with:
     version: '1.3.0'
 - run: trellis doctor --format github
@@ -56,13 +56,13 @@ jobs:
       matrix: ${{ steps.workspace.outputs.matrix }}
       has_packages: ${{ steps.workspace.outputs.has_packages }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: tylerbutler/actions/setup-trellis@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/setup-trellis@main
+      - uses: tylerbutler/actions/setup-trellis@9d2a7c45ab9c7e04a3ac35445f187840f126ac47 # ratchet:tylerbutler/actions/setup-trellis@main
         with:
           version: '1.3.0'
-      - uses: tylerbutler/actions/trellis-workspace@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/trellis-workspace@main
+      - uses: tylerbutler/actions/trellis-workspace@9d2a7c45ab9c7e04a3ac35445f187840f126ac47 # ratchet:tylerbutler/actions/trellis-workspace@main
         id: workspace
         # Omit since for full selection. For affected-only PR checks use:
         # with:
@@ -74,14 +74,14 @@ jobs:
     strategy:
       matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
-      - uses: tylerbutler/actions/setup-gleam@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/setup-gleam@main
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
+      - uses: tylerbutler/actions/setup-gleam@9d2a7c45ab9c7e04a3ac35445f187840f126ac47 # ratchet:tylerbutler/actions/setup-gleam@main
         with:
           version-file: ''
           gleam-version: '1.13.0'
           erlang-version: '28'
           run-deps: 'false'
-      - uses: tylerbutler/actions/setup-trellis@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/setup-trellis@main
+      - uses: tylerbutler/actions/setup-trellis@9d2a7c45ab9c7e04a3ac35445f187840f126ac47 # ratchet:tylerbutler/actions/setup-trellis@main
         with:
           version: '1.3.0'
       - run: trellis run test "$PACKAGE"
@@ -104,7 +104,7 @@ commits, branch updates, and PR creation. The summary uses its structured
 outcome; this action exposes no scraped PR outputs.
 
 ```yaml
-- uses: tylerbutler/actions/trellis-release-pr@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/trellis-release-pr@main
+- uses: tylerbutler/actions/trellis-release-pr@9d2a7c45ab9c7e04a3ac35445f187840f126ac47 # ratchet:tylerbutler/actions/trellis-release-pr@main
   with:
     token: ${{ steps.app.outputs.token }}
     pre: rc
@@ -135,7 +135,7 @@ tags, while stable promotion advances the configured series. The action does
 not require Hex publication; callers own ordering and concurrency.
 
 ```yaml
-- uses: tylerbutler/actions/trellis-tag@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/trellis-tag@main
+- uses: tylerbutler/actions/trellis-tag@9d2a7c45ab9c7e04a3ac35445f187840f126ac47 # ratchet:tylerbutler/actions/trellis-tag@main
   with:
     push: 'true'
     github_release: 'true'
@@ -156,7 +156,7 @@ then fail if either command fails. Inputs: `working_directory` (`.`),
 Install trellis and fetch the required history before calling.
 
 ```yaml
-- uses: tylerbutler/actions/trellis-check@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/trellis-check@main
+- uses: tylerbutler/actions/trellis-check@9d2a7c45ab9c7e04a3ac35445f187840f126ac47 # ratchet:tylerbutler/actions/trellis-check@main
   with:
     base: ${{ github.event.pull_request.base.sha }}
     head: ${{ github.event.pull_request.head.sha }}
@@ -182,7 +182,7 @@ publication or authenticated queries. The key is scoped to this step.
 The summary reports the CLI outcome; there are no log-derived per-package outputs.
 
 ```yaml
-- uses: tylerbutler/actions/trellis-publish@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/trellis-publish@main
+- uses: tylerbutler/actions/trellis-publish@9d2a7c45ab9c7e04a3ac35445f187840f126ac47 # ratchet:tylerbutler/actions/trellis-publish@main
   with:
     all_untagged: 'true'
     hex_api_key: ${{ secrets.HEXPM_API_KEY }}
@@ -237,7 +237,7 @@ permissions:
   statuses: write
 jobs:
   release:
-    uses: tylerbutler/actions/.github/workflows/trellis-release.yml@41bb547a4588a47db7c852118dbde194913e9c8f # ratchet:tylerbutler/actions/.github/workflows/trellis-release.yml@main
+    uses: tylerbutler/actions/.github/workflows/trellis-release.yml@9d2a7c45ab9c7e04a3ac35445f187840f126ac47 # ratchet:tylerbutler/actions/.github/workflows/trellis-release.yml@main
     with:
       trellis_version: '1.3.0'
       release_mode: mixed
@@ -323,7 +323,7 @@ override in trellis mode fails instead of guessing which format you intended.
 ```yaml
 jobs:
   ci:
-    uses: tylerbutler/actions/.github/workflows/gleam-workspace-ci.yml@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/.github/workflows/gleam-workspace-ci.yml@main
+    uses: tylerbutler/actions/.github/workflows/gleam-workspace-ci.yml@9d2a7c45ab9c7e04a3ac35445f187840f126ac47 # ratchet:tylerbutler/actions/.github/workflows/gleam-workspace-ci.yml@main
     with:
       working-directory: gleam
       trellis_version: '1.3.0'
@@ -378,8 +378,8 @@ jobs:
     outputs:
       packages: ${{ steps.workspace.outputs.packages-json }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
-      - uses: tylerbutler/actions/read-gleam-workspace@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/read-gleam-workspace@main
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
+      - uses: tylerbutler/actions/read-gleam-workspace@9d2a7c45ab9c7e04a3ac35445f187840f126ac47 # ratchet:tylerbutler/actions/read-gleam-workspace@main
         id: workspace
         with:
           workspace-file: workspace.toml
@@ -390,14 +390,14 @@ jobs:
       matrix:
         package: ${{ fromJSON(needs.discover.outputs.packages) }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
-      - uses: tylerbutler/actions/setup-gleam@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/setup-gleam@main
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
+      - uses: tylerbutler/actions/setup-gleam@9d2a7c45ab9c7e04a3ac35445f187840f126ac47 # ratchet:tylerbutler/actions/setup-gleam@main
         with:
           version-file: ''
           gleam-version: '1.13.0'
           erlang-version: '28'
           run-deps: 'false'
-      - uses: tylerbutler/actions/run-gleam-workspace@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/run-gleam-workspace@main
+      - uses: tylerbutler/actions/run-gleam-workspace@9d2a7c45ab9c7e04a3ac35445f187840f126ac47 # ratchet:tylerbutler/actions/run-gleam-workspace@main
         with:
           packages: ${{ matrix.package.path }}
           command: gleam test
@@ -414,16 +414,16 @@ records without consumer changes.
 
 ```yaml
 steps:
-  - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
-  - uses: tylerbutler/actions/setup-gleam@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/setup-gleam@main
+  - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
+  - uses: tylerbutler/actions/setup-gleam@9d2a7c45ab9c7e04a3ac35445f187840f126ac47 # ratchet:tylerbutler/actions/setup-gleam@main
     with:
       version-file: ''
       gleam-version: '1.13.0'
       erlang-version: '28'
       run-deps: 'false'
-  - uses: tylerbutler/actions/read-gleam-workspace@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/read-gleam-workspace@main
+  - uses: tylerbutler/actions/read-gleam-workspace@9d2a7c45ab9c7e04a3ac35445f187840f126ac47 # ratchet:tylerbutler/actions/read-gleam-workspace@main
     id: workspace
-  - uses: tylerbutler/actions/run-gleam-workspace@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/run-gleam-workspace@main
+  - uses: tylerbutler/actions/run-gleam-workspace@9d2a7c45ab9c7e04a3ac35445f187840f126ac47 # ratchet:tylerbutler/actions/run-gleam-workspace@main
     with:
       packages: ${{ steps.workspace.outputs.packages }}
       command: gleam test
@@ -433,14 +433,14 @@ steps:
 
 ```yaml
 steps:
-  - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
-  - uses: tylerbutler/actions/setup-gleam@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/setup-gleam@main
+  - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
+  - uses: tylerbutler/actions/setup-gleam@9d2a7c45ab9c7e04a3ac35445f187840f126ac47 # ratchet:tylerbutler/actions/setup-gleam@main
     with:
       version-file: ''
       gleam-version: '1.13.0'
       erlang-version: '28'
       run-deps: 'false'
-  - uses: tylerbutler/actions/setup-trellis@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/setup-trellis@main
+  - uses: tylerbutler/actions/setup-trellis@9d2a7c45ab9c7e04a3ac35445f187840f126ac47 # ratchet:tylerbutler/actions/setup-trellis@main
     with:
       version: '1.3.0'
   - run: trellis run test
@@ -457,14 +457,14 @@ sequential execution. No extra trellis-run wrapper is needed.
 
 ```yaml
 steps:
-  - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
-  - uses: tylerbutler/actions/setup-gleam@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/setup-gleam@main
+  - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
+  - uses: tylerbutler/actions/setup-gleam@9d2a7c45ab9c7e04a3ac35445f187840f126ac47 # ratchet:tylerbutler/actions/setup-gleam@main
     with:
       version-file: ''
       gleam-version: '1.13.0'
       erlang-version: '28'
       run-deps: 'false'
-  - uses: tylerbutler/actions/gleam-publish@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/gleam-publish@main
+  - uses: tylerbutler/actions/gleam-publish@9d2a7c45ab9c7e04a3ac35445f187840f126ac47 # ratchet:tylerbutler/actions/gleam-publish@main
     with:
       packages: packages/core packages/app
       replace-path-deps: |
@@ -476,20 +476,20 @@ steps:
 
 ```yaml
 steps:
-  - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+  - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
     with:
       ref: ${{ inputs.approved_release_sha }}
       fetch-depth: 0
-  - uses: tylerbutler/actions/setup-gleam@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/setup-gleam@main
+  - uses: tylerbutler/actions/setup-gleam@9d2a7c45ab9c7e04a3ac35445f187840f126ac47 # ratchet:tylerbutler/actions/setup-gleam@main
     with:
       version-file: ''
       gleam-version: '1.13.0'
       erlang-version: '28'
       run-deps: 'false'
-  - uses: tylerbutler/actions/setup-trellis@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/setup-trellis@main
+  - uses: tylerbutler/actions/setup-trellis@9d2a7c45ab9c7e04a3ac35445f187840f126ac47 # ratchet:tylerbutler/actions/setup-trellis@main
     with:
       version: '1.3.0'
-  - uses: tylerbutler/actions/trellis-publish@9c477d65be501f978614b62f34a183cf52fa1c43 # ratchet:tylerbutler/actions/trellis-publish@main
+  - uses: tylerbutler/actions/trellis-publish@9d2a7c45ab9c7e04a3ac35445f187840f126ac47 # ratchet:tylerbutler/actions/trellis-publish@main
     with:
       all_untagged: 'true'
       hex_api_key: ${{ secrets.HEXPM_API_KEY }}

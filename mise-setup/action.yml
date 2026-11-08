@@ -23,7 +23,7 @@ runs:
   using: composite
   steps:
     - name: Setup mise
-      uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # ratchet:jdx/mise-action@v4
+      uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # ratchet:jdx/mise-action@v5
       with:
         experimental: ${{ inputs.experimental }}
         working_directory: ${{ inputs.working-directory }}
