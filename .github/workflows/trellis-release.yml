@@ -124,6 +124,15 @@ jobs:
               core.setOutput("publish_sha", pr.merge_commit_sha);
             } else if (["push", "workflow_dispatch"].includes(context.eventName)) {
               if (context.ref !== `refs/heads/${base}`) throw new Error("Prepare on the configured base branch.");
+              if (context.eventName === "workflow_dispatch") {
+                const {data: ref} = await github.rest.git.getRef({...repo, ref: `heads/${base}`});
+                const sha = ref.object.sha;
+                if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error("Invalid manual reservation base SHA.");
+                await github.rest.repos.createCommitStatus({
+                  ...repo, sha, context: "trellis/release_request", state: "pending",
+                  description: "Manual request reserved before checkout, installation, and preparation",
+                });
+              }
               core.setOutput("prepare", "true");
             } else {
               throw new Error("Unsupported release event.");

@@ -19,6 +19,7 @@ async function run(name, options = {}) {
     GLEAM_VERSION: "1.13.0", ERLANG_VERSION: "28", WORKING_DIRECTORY: ".", RELEASE_SHA: SHA,
     ...options.env};
   const rest = {
+    git: {getRef: async () => ({data: {object: {sha: options.baseSha || SHA}}})},
     pulls: {get: async () => ({data: options.pr || pr()}), list: "pulls"},
     repos: {
       listCommitStatusesForRef: "statuses", listCommits: "commits",
@@ -65,6 +66,11 @@ async function tests() {
     .outputs.prepare, "true");
   await assert.rejects(run("select", {ref: "refs/heads/other"}), /base branch/);
   await assert.rejects(run("select", {event: "pull_request_target"}), /Unsupported/);
+  const earlyReservation = await run("select", {event: "workflow_dispatch"});
+  assert.equal(earlyReservation.writes[0].sha, SHA);
+  assert.equal(earlyReservation.writes[0].context, "trellis/release_request");
+  assert.equal(earlyReservation.writes[0].state, "pending");
+  await assert.rejects(run("select", {event: "workflow_dispatch", baseSha: "bad"}), /reservation base/);
   const fork = pr({head: {ref: "release/pending", repo: {full_name: "attacker/repo"}}});
   assert.deepEqual((await run("select", {event: "pull_request", pr: fork})).outputs, {});
   assert.deepEqual((await run("select", {event: "pull_request", pr: pr({merged: false})})).outputs, {});
@@ -98,6 +104,9 @@ async function tests() {
   assert.equal(manual.writes[0].context, "trellis/release_request");
   assert.equal(manual.writes[0].state, "pending");
   const reservation = {...success, [OLD]: [{context: "trellis/release_request", state: "pending"}]};
+  assert.deepEqual((await run("prepare-gate", {closed: [], statuses: {
+    [SHA]: [{context: "trellis/release_request", state: "pending"}]},
+  })).outputs, {}); // App-token, checkout, or install failure cannot hand ownership to a push.
   assert.deepEqual((await run("prepare-gate", {statuses: reservation, commits: [OLD, SHA]})).outputs, {});
   assert.deepEqual((await run("prepare-gate", {statuses: reservation, commits: [OLD], closed: []})).outputs, {});
   assert.deepEqual((await run("prepare-gate", {statuses: success, version: "1.1.0-rc.0"})).outputs, {});
