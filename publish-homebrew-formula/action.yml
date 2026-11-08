@@ -50,7 +50,7 @@ runs:
 
     - name: Mint GitHub App token for tap repo
       id: app-token
-      uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # ratchet:actions/create-github-app-token@v3
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # ratchet:actions/create-github-app-token@v3
       with:
         app-id: ${{ inputs.app-id }}
         private-key: ${{ inputs.private-key }}
@@ -58,14 +58,14 @@ runs:
         repositories: ${{ steps.tap.outputs.repo }}
 
     - name: Checkout tap
-      uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # ratchet:actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
       with:
         persist-credentials: true
         repository: ${{ inputs.tap-repo }}
         token: ${{ steps.app-token.outputs.token }}
 
     - name: Download formula artifacts
-      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # ratchet:actions/download-artifact@v8
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # ratchet:actions/download-artifact@v8
       with:
         pattern: ${{ inputs.artifact-pattern }}
         path: Formula/
