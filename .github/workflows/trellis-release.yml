@@ -155,10 +155,12 @@ jobs:
           version: ${{ inputs.trellis_version }}
 
       - name: Verify checkout and reserve publication
+        id: reserve
         if: steps.select.outputs.publish_sha != ''
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # ratchet:actions/github-script@v9
         env:
           RELEASE_SHA: ${{ steps.select.outputs.publish_sha }}
+          PUBLICATION_TOKEN: ${{ secrets.publication_token || github.token }}
         with:
           github-token: ${{ secrets.publication_token || github.token }}
           script: |
@@ -166,6 +168,15 @@ jobs:
             const sha = process.env.RELEASE_SHA;
             const result = await exec.getExecOutput("git", ["rev-parse", "HEAD"]);
             if (result.stdout.trim() !== sha) throw new Error("Release checkout changed.");
+            const origin = (await exec.getExecOutput("git", ["remote", "get-url", "origin"])).stdout.trim();
+            const expected = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}`;
+            if (![expected, `${expected}.git`].includes(origin)) throw new Error("Unexpected checkout origin.");
+            const token = process.env.PUBLICATION_TOKEN;
+            if (!token || /\s/.test(token)) throw new Error("Publication requires a token without whitespace.");
+            const header = "AUTHORIZATION: basic " + Buffer.from(`x-access-token:${token}`).toString("base64");
+            core.setSecret(header);
+            core.setOutput("git_header", header);
+            core.setOutput("git_origin", origin);
             await github.rest.repos.createCommitStatus({
               ...context.repo, sha, context: "trellis/release", state: "pending",
               description: "Publication and tagging started",
@@ -187,21 +198,31 @@ jobs:
       - name: Publish Hex members
         id: publish
         if: steps.select.outputs.publish_sha != '' && inputs.release_mode != 'git_only'
-        uses: tylerbutler/actions/trellis-publish@9d2a7c45ab9c7e04a3ac35445f187840f126ac47 # ratchet:tylerbutler/actions/trellis-publish@main
-        with:
-          working_directory: ${{ inputs.working_directory }}
-          all_untagged: 'true'
-          hex_api_key: ${{ secrets.hex_api_key }}
+        shell: bash
+        working-directory: ${{ inputs.working_directory }}
+        env:
+          HEXPM_API_KEY: ${{ secrets.hex_api_key }}
+        run: |
+          if [[ -z "$HEXPM_API_KEY" ]]; then
+            echo "::error::hex_api_key is required for publication"
+            exit 1
+          fi
+          trellis publish --all-untagged
 
       - name: Tag approved release
         id: tag
         if: steps.select.outputs.publish_sha != ''
-        uses: tylerbutler/actions/trellis-tag@9d2a7c45ab9c7e04a3ac35445f187840f126ac47 # ratchet:tylerbutler/actions/trellis-tag@main
-        with:
-          working_directory: ${{ inputs.working_directory }}
-          push: 'true'
-          github_release: 'true'
-          token: ${{ secrets.publication_token || github.token }}
+        shell: bash
+        working-directory: ${{ inputs.working_directory }}
+        env:
+          GH_TOKEN: ${{ secrets.publication_token || github.token }}
+          GITHUB_TOKEN: ${{ secrets.publication_token || github.token }}
+          GIT_CONFIG_COUNT: '2'
+          GIT_CONFIG_KEY_0: http.${{ steps.reserve.outputs.git_origin }}.extraheader
+          GIT_CONFIG_VALUE_0: ''
+          GIT_CONFIG_KEY_1: http.${{ steps.reserve.outputs.git_origin }}.extraheader
+          GIT_CONFIG_VALUE_1: ${{ steps.reserve.outputs.git_header }}
+        run: trellis tag create --push --github-release
 
       - name: Record publication outcome
         id: publication
@@ -217,6 +238,13 @@ jobs:
             // script: publication-outcome
             const complete = process.env.TAG_OUTCOME === "success"
               && (process.env.RELEASE_MODE === "git_only" || process.env.PUBLISH_OUTCOME === "success");
+            for (const [name, outcome] of [
+              ["Trellis publish", process.env.PUBLISH_OUTCOME],
+              ["Trellis tag", process.env.TAG_OUTCOME],
+            ]) {
+              core.summary.addHeading(name, 2).addRaw(`Step outcome: \`${outcome || "not run"}\`.\n`);
+            }
+            await core.summary.write();
             await github.rest.repos.createCommitStatus({
               ...context.repo, sha: process.env.RELEASE_SHA, context: "trellis/release",
               state: complete ? "success" : "failure",
@@ -303,6 +331,13 @@ jobs:
               }
             }
             const current = (await exec.getExecOutput("git", ["rev-parse", "HEAD"])).stdout.trim();
+            const origin = (await exec.getExecOutput("git", ["remote", "get-url", "origin"])).stdout.trim();
+            const expected = `${context.serverUrl}/${repo.owner}/${repo.repo}`;
+            if (![expected, `${expected}.git`].includes(origin)) throw new Error("Unexpected checkout origin.");
+            const token = process.env.PREPARATION_TOKEN;
+            if (!token || /\s/.test(token)) throw new Error("Preparation requires the preparation token without whitespace.");
+            const header = "AUTHORIZATION: basic " + Buffer.from(`x-access-token:${token}`).toString("base64");
+            core.setSecret(header);
             const versions = async () => {
               const result = await exec.getExecOutput("trellis", ["list", "--releasable", "--json"], {
                 cwd: process.env.WORKING_DIRECTORY,
@@ -318,13 +353,6 @@ jobs:
               if (candidate(await versions())) { core.info("Candidate base requires a manual request."); return; }
               if (open[0]) {
                 if (!/^[0-9a-f]{40}$/.test(open[0].head.sha)) throw new Error("Invalid pending head SHA.");
-                const origin = (await exec.getExecOutput("git", ["remote", "get-url", "origin"])).stdout.trim();
-                const expected = `${context.serverUrl}/${repo.owner}/${repo.repo}`;
-                if (![expected, `${expected}.git`].includes(origin)) throw new Error("Unexpected checkout origin.");
-                const token = process.env.PREPARATION_TOKEN;
-                if (!token) throw new Error("Pending release fetch requires the preparation token.");
-                const header = "AUTHORIZATION: basic " + Buffer.from(`x-access-token:${token}`).toString("base64");
-                core.setSecret(header);
                 const gitEnv = {...process.env};
                 let count = Number(gitEnv.GIT_CONFIG_COUNT || "0");
                 if (!Number.isSafeInteger(count) || count < 0) throw new Error("Invalid Git config count.");
@@ -355,21 +383,52 @@ jobs:
               core.setOutput("reservation_sha", current);
               core.setOutput("reservation_shas", JSON.stringify([...new Set([...reservations, current])]));
             }
+            core.setOutput("git_header", header);
+            core.setOutput("git_origin", origin);
             core.setOutput("prepare", "true");
             // end-script
 
       - name: Prepare release PR
         id: prepare
         if: steps.gate.outputs.prepare == 'true'
-        uses: tylerbutler/actions/trellis-release-pr@9d2a7c45ab9c7e04a3ac35445f187840f126ac47 # ratchet:tylerbutler/actions/trellis-release-pr@main
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # ratchet:actions/github-script@v9
+        env:
+          PRE: ${{ github.event_name == 'workflow_dispatch' && inputs.pre || '' }}
+          SET: ${{ github.event_name == 'workflow_dispatch' && inputs.set || '' }}
+          BUMP: ${{ github.event_name == 'workflow_dispatch' && inputs.bump || '' }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          GITHUB_TOKEN: ${{ steps.app.outputs.token }}
+          GIT_CONFIG_COUNT: '2'
+          GIT_CONFIG_KEY_0: http.${{ steps.gate.outputs.git_origin }}.extraheader
+          GIT_CONFIG_VALUE_0: ''
+          GIT_CONFIG_KEY_1: http.${{ steps.gate.outputs.git_origin }}.extraheader
+          GIT_CONFIG_VALUE_1: ${{ steps.gate.outputs.git_header }}
         with:
-          working_directory: ${{ inputs.working_directory }}
-          base: ${{ inputs.base }}
-          branch: ${{ inputs.release_branch }}
-          pre: ${{ github.event_name == 'workflow_dispatch' && inputs.pre || '' }}
-          set: ${{ github.event_name == 'workflow_dispatch' && inputs.set || '' }}
-          bump: ${{ github.event_name == 'workflow_dispatch' && inputs.bump || '' }}
-          token: ${{ steps.app.outputs.token }}
+          github-token: ${{ steps.app.outputs.token }}
+          script: |
+            // script: prepare
+            const args = ["release", "pr", "--base", process.env.RELEASE_BASE,
+              "--branch", process.env.RELEASE_BRANCH, "--github-output"];
+            const pre = process.env.PRE.trim();
+            if (pre) args.push("--pre", pre);
+            for (const flag of ["set", "bump"]) {
+              for (const line of process.env[flag.toUpperCase()].split(/\r\n|[\n\r]/)) {
+                if (line.trim()) args.push(`--${flag}`, line.trim());
+              }
+            }
+            core.summary.addHeading("Trellis release PR", 2);
+            try {
+              const result = await exec.getExecOutput("trellis", args, {cwd: process.env.WORKING_DIRECTORY});
+              const outcome = result.stdout.match(/^outcome=(prepared|unchanged|no_changes)\r?$/m)?.[1];
+              if (!outcome) throw new Error("Missing or invalid trellis preparation outcome.");
+              core.summary.addRaw(`Preparation outcome: \`${outcome}\`.\n`);
+            } catch (error) {
+              core.summary.addRaw("Preparation failed; see the step log.\n");
+              throw error;
+            } finally {
+              await core.summary.write();
+            }
+            // end-script
 
       - name: Clear successful manual no-op
         if: steps.prepare.outcome == 'success' && steps.gate.outputs.reservation_sha != ''

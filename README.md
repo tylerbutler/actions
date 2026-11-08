@@ -209,6 +209,13 @@ preparation App credentials. Optional inputs: `working_directory`, `base`
 Hex/mixed publication also requires pinned `gleam_version`, `erlang_version`,
 and `hex_api_key`. Git-only needs no Hex key or runtime installation.
 
+The coordinator invokes `trellis release pr --github-output`,
+`trellis publish --all-untagged`, and `trellis tag create --push --github-release`
+directly. Trellis owns release planning, publication retries, and tag
+reconciliation; the workflow retains GitHub approval, ownership, and recovery
+checks. The standalone `trellis-release-pr`, `trellis-publish`, and `trellis-tag`
+actions remain available for other workflows.
+
 ```yaml
 name: Release
 on:
@@ -260,7 +267,9 @@ your own workflow. Do not add a second tag-triggered publisher to this recipe.
 The App needs Contents, Pull requests, and Commit statuses read/write on this
 repository. Preparation uses its installation token to trigger ordinary CI.
 Pending-branch checks use the same token for private git fetches without
-persisting checkout credentials.
+persisting checkout credentials. Preparation and tagging pass masked,
+repository-scoped Git authorization headers through step-local environment
+variables; API tokens alone do not authenticate Git pushes.
 Publication uses a separate optional `publication_token`, or the workflow token,
 with Contents write, Pull requests read, and Commit statuses write. Hex credentials
 appear only in the publishing step. Protect the configured base with reviews and

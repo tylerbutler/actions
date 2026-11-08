@@ -1,5 +1,8 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const {spawnSync} = require("node:child_process");
 const workflow = fs.readFileSync(".github/workflows/trellis-release.yml", "utf8");
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 const SHA = "a".repeat(40);
@@ -12,13 +15,14 @@ const pr = (extra = {}) => ({
 
 async function run(name, options = {}) {
   const source = workflow.match(new RegExp(`// script: ${name}\\n([\\s\\S]*?)// end-script`))[1];
-  const outputs = {}, writes = [], commands = [], commandEnvs = [];
+  const outputs = {}, writes = [], commands = [], commandEnvs = [], secrets = [], summaries = [];
   const context = {repo: {owner: "example", repo: "repo"}, eventName: options.event || "push",
     ref: options.ref || "refs/heads/main", serverUrl: "https://github.com",
     payload: {action: "closed", pull_request: options.eventPr || pr()}};
   const env = {RELEASE_BASE: "main", RELEASE_BRANCH: "release/pending", RELEASE_MODE: options.mode || "hex",
     GLEAM_VERSION: "1.13.0", ERLANG_VERSION: "28", WORKING_DIRECTORY: ".", RELEASE_SHA: SHA,
-    PREPARATION_TOKEN: "test-token", ...options.env};
+    PREPARATION_TOKEN: "test-token", PUBLICATION_TOKEN: "publish-token",
+    PRE: "", SET: "", BUMP: "", ...options.env};
   const rest = {
     git: {getRef: async () => ({data: {object: {sha: options.baseSha || SHA}}})},
     pulls: {get: async () => ({data: options.pr || pr()}), list: "pulls"},
@@ -41,17 +45,84 @@ async function run(name, options = {}) {
       commandEnvs.push(options.env);
       if (args[0] === "checkout") pending = args[1] === "--detach";
     },
-    getExecOutput: async (command, args) => {
+    getExecOutput: async (command, args, execOptions = {}) => {
       commands.push([command, ...args]);
-      if (args[0] === "remote") return {stdout: "https://github.com/example/repo"};
+      commandEnvs.push(execOptions);
+      if (args[0] === "remote") return {stdout: options.origin || "https://github.com/example/repo"};
       if (command === "git") return {stdout: options.checkout || SHA};
+      if (args[0] === "release") {
+        if (options.prepareFailure) throw new Error("trellis exit 3");
+        return {stdout: options.prepareOutput ?? "outcome=prepared\n"};
+      }
       return {stdout: JSON.stringify({packages: [{version: pending ?
         options.pendingVersion || "1.0.0" : options.version || "1.0.0"}]})};
     },
   };
+  const summary = {
+    addHeading: text => {summaries.push(text); return summary;},
+    addRaw: text => {summaries.push(text); return summary;},
+    write: async () => {},
+  };
   await new AsyncFunction("github", "context", "core", "exec", "process", source)(
-    {rest, paginate}, context, {setOutput: (k,v) => outputs[k] = v, info: () => {}, setSecret: () => {}}, exec, {env});
-  return {outputs, writes, commands, commandEnvs};
+    {rest, paginate}, context, {setOutput: (k,v) => outputs[k] = v, info: () => {},
+      setSecret: value => secrets.push(value), summary}, exec, {env});
+  return {outputs, writes, commands, commandEnvs, secrets, summaries};
+}
+
+function step(name) {
+  return workflow.split(`      - name: ${name}\n`)[1].split("\n      - name:")[0];
+}
+
+function nativeShellTests() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trellis-workflow-"));
+  try {
+    fs.writeFileSync(path.join(dir, "trellis"), `#!/usr/bin/env bash
+printf '%s\\n' "$@" > "$TEST_ARGS"
+printf '%s\\n' "$PWD" > "$TEST_CWD"
+printf '%s\\n' "\${HEXPM_API_KEY-unset}" > "$TEST_KEY"
+exit "$TEST_EXIT"
+`, {mode: 0o700});
+    for (const [name, args] of [
+      ["Publish Hex members", ["publish", "--all-untagged"]],
+      ["Tag approved release", ["tag", "create", "--push", "--github-release"]],
+    ]) {
+      const source = step(name);
+      const script = source.includes("        run: |\n")
+        ? source.split("        run: |\n")[1].split("\n").map(line => line.replace(/^          /, "")).join("\n")
+        : source.match(/        run: (.+)/)[1];
+      assert(!script.includes("${{"), "No expression interpolation in native shell");
+      for (const code of [0, 3]) {
+        const summary = path.join(dir, "summary");
+        fs.writeFileSync(summary, "");
+        const env = {...process.env, PATH: `${dir}:${process.env.PATH}`, TEST_EXIT: String(code),
+          TEST_ARGS: path.join(dir, "args"), TEST_CWD: path.join(dir, "cwd"),
+          TEST_KEY: path.join(dir, "key"), GITHUB_STEP_SUMMARY: summary};
+        if (name === "Publish Hex members") env.HEXPM_API_KEY = "fake-key";
+        else delete env.HEXPM_API_KEY;
+        const result = spawnSync("bash", ["--noprofile", "--norc", "-e", "-o", "pipefail", "-c", script], {
+          cwd: dir, encoding: "utf8", env,
+        });
+        assert.equal(result.status, code, result.stderr);
+        assert.deepEqual(fs.readFileSync(path.join(dir, "args"), "utf8").trim().split("\n"), args);
+        assert.equal(fs.readFileSync(path.join(dir, "cwd"), "utf8").trim(), fs.realpathSync(dir));
+        assert.equal(fs.readFileSync(path.join(dir, "key"), "utf8").trim(),
+          name === "Publish Hex members" ? "fake-key" : "unset");
+        assert.equal(fs.readFileSync(summary, "utf8"), "", "The outcome recorder owns summaries");
+      }
+    }
+    const publishScript = step("Publish Hex members").split("        run: |\n")[1]
+      .split("\n").map(line => line.replace(/^          /, "")).join("\n");
+    fs.unlinkSync(path.join(dir, "args"));
+    const missing = spawnSync("bash", ["-e", "-c", publishScript], {
+      cwd: dir, encoding: "utf8", env: {...process.env, PATH: `${dir}:${process.env.PATH}`,
+        HEXPM_API_KEY: "", GITHUB_STEP_SUMMARY: path.join(dir, "summary")},
+    });
+    assert.equal(missing.status, 1);
+    assert(missing.stdout.includes("::error::hex_api_key is required"));
+    assert(!fs.existsSync(path.join(dir, "args")), "Missing key must fail before CLI invocation");
+  } finally {
+    fs.rmSync(dir, {recursive: true, force: true});
+  }
 }
 
 async function tests() {
@@ -62,6 +133,9 @@ async function tests() {
       env: {TAG_OUTCOME: "success", PUBLISH_OUTCOME: mode === "git_only" ? "skipped" : "success"}});
     assert.equal(completed.writes[0].state, "success");
     assert.equal(completed.outputs.complete, "true");
+    assert(completed.summaries.includes("Trellis publish"));
+    assert(completed.summaries.includes("Trellis tag"));
+    assert(completed.summaries.includes(`Step outcome: \`${mode === "git_only" ? "skipped" : "success"}\`.\n`));
   }
   await assert.rejects(run("select", {mode: "unknown"}), /release_mode/);
   await assert.rejects(run("select", {env: {GLEAM_VERSION: ""}}), /requires/);
@@ -89,11 +163,42 @@ async function tests() {
   assert.deepEqual(completedOld.outputs, {prepare: "true"});
   await assert.rejects(run("reserve-publication", {checkout: OLD}), /checkout changed/);
   assert.equal((await run("reserve-publication")).writes[0].state, "pending");
+  const reserved = await run("reserve-publication", {origin: "https://github.com/example/repo.git"});
+  assert.equal(reserved.outputs.git_origin, "https://github.com/example/repo.git");
+  assert.equal(reserved.outputs.git_header,
+    "AUTHORIZATION: basic " + Buffer.from("x-access-token:publish-token").toString("base64"));
+  assert(reserved.secrets.includes(reserved.outputs.git_header));
+  for (const origin of ["https://github.com/example/repo", "https://github.com/example/repo.git"]) {
+    const auth = await run("reserve-publication", {origin});
+    const env = {...process.env, GIT_CONFIG_COUNT: "2",
+      GIT_CONFIG_KEY_0: `http.${auth.outputs.git_origin}.extraheader`, GIT_CONFIG_VALUE_0: "",
+      GIT_CONFIG_KEY_1: `http.${auth.outputs.git_origin}.extraheader`,
+      GIT_CONFIG_VALUE_1: auth.outputs.git_header};
+    const matched = spawnSync("git", ["config", "--get-urlmatch", "http.extraheader", origin],
+      {env, encoding: "utf8"});
+    assert.equal(matched.status, 0, matched.stderr);
+    assert.equal(matched.stdout.trim(), auth.outputs.git_header);
+    const unrelated = spawnSync("git",
+      ["config", "--get-urlmatch", "http.extraheader", "https://github.com/example/other.git"],
+      {env, encoding: "utf8"});
+    assert(!unrelated.stdout.includes(auth.outputs.git_header), "Authorization must not reach another repo");
+  }
+  for (const name of ["reserve-publication", "prepare-gate"]) {
+    await assert.rejects(run(name, {closed: [], origin: "https://attacker.invalid/example/repo"}), /origin/);
+  }
+  await assert.rejects(run("reserve-publication", {env: {PUBLICATION_TOKEN: "bad token"}}), /token/);
   for (const mode of ["hex", "git_only", "mixed"]) {
     const failed = await run("publication-outcome", {mode, env: {TAG_OUTCOME: "failure", PUBLISH_OUTCOME: "success"}});
     assert.equal(failed.writes[0].state, "failure");
     assert.deepEqual(failed.outputs, {});
+    assert(failed.summaries.includes("Step outcome: `failure`.\n"));
   }
+  const skipped = await run("publication-outcome", {env: {TAG_OUTCOME: "skipped", PUBLISH_OUTCOME: "failure"}});
+  assert.equal(skipped.writes[0].state, "failure");
+  assert(skipped.summaries.includes("Step outcome: `skipped`.\n"));
+  const notRun = await run("publication-outcome");
+  assert.equal(notRun.writes[0].state, "failure");
+  assert(notRun.summaries.includes("Step outcome: `not run`.\n"));
   assert.equal((await run("publication-outcome", {env: {TAG_OUTCOME: "success", PUBLISH_OUTCOME: "failure"}}))
     .writes[0].state, "failure");
   for (const state of [null, "pending", "failure"]) {
@@ -132,15 +237,56 @@ async function tests() {
   assert.equal(noop.writes[1].sha, SHA);
   assert.deepEqual((await run("clear-noop", {open: [pr()]})).writes, []);
 
+  for (const outcome of ["prepared", "unchanged", "no_changes"]) {
+    const prepared = await run("prepare", {prepareOutput: `outcome=${outcome}\npr_url=https://example.invalid/pr\n`,
+      env: {PRE: " none ", SET: " a=1.3.0 \r\n\nb=$(touch bad)\n c=has spaces ",
+        BUMP: "a=minor\r\nb=patch", WORKING_DIRECTORY: "packages/with spaces"}});
+    assert.deepEqual(prepared.commands, [["trellis", "release", "pr", "--base", "main",
+      "--branch", "release/pending", "--github-output", "--pre", "none",
+      "--set", "a=1.3.0", "--set", "b=$(touch bad)", "--set", "c=has spaces",
+      "--bump", "a=minor", "--bump", "b=patch"]]);
+    assert.equal(prepared.commandEnvs[0].cwd, "packages/with spaces");
+    assert(prepared.summaries.some(text => text.includes(`\`${outcome}\``)));
+  }
+  assert.deepEqual((await run("prepare")).commands[0].slice(1),
+    ["release", "pr", "--base", "main", "--branch", "release/pending", "--github-output"]);
+  await assert.rejects(run("prepare", {prepareFailure: true}), /exit 3/);
+  for (const output of ["", "outcome=bad\n"]) {
+    await assert.rejects(run("prepare", {prepareOutput: output}), /preparation outcome/);
+  }
+  nativeShellTests();
+  for (const [name, authStep, token] of [
+    ["Tag approved release", "reserve", "secrets.publication_token || github.token"],
+    ["Prepare release PR", "gate", "steps.app.outputs.token"],
+  ]) {
+    const source = step(name);
+    assert(source.includes(`GH_TOKEN: \${{ ${token} }}`));
+    assert(source.includes(`GITHUB_TOKEN: \${{ ${token} }}`));
+    assert(source.includes("GIT_CONFIG_COUNT: '2'"));
+    assert(source.includes(`GIT_CONFIG_KEY_0: http.\${{ steps.${authStep}.outputs.git_origin }}.extraheader`));
+    assert(source.includes("GIT_CONFIG_VALUE_0: ''"));
+    assert(source.includes(`GIT_CONFIG_KEY_1: http.\${{ steps.${authStep}.outputs.git_origin }}.extraheader`));
+    assert(source.includes(`GIT_CONFIG_VALUE_1: \${{ steps.${authStep}.outputs.git_header }}`));
+    assert(!source.includes("GITHUB_ENV") && !source.includes("git config"));
+  }
+  assert.equal((workflow.match(/persist-credentials: false/g) || []).length, 2);
+  assert(!/uses: .*\/trellis-(release-pr|publish|tag)@/.test(workflow));
+  assert(step("Tag approved release").includes("if: steps.select.outputs.publish_sha != ''"));
+  assert(!step("Tag approved release").includes("always()"), "Failed publication must skip tags");
+  assert(step("Publish Hex members").includes("inputs.release_mode != 'git_only'"));
+  assert(step("Prepare release PR").includes("if: steps.gate.outputs.prepare == 'true'"));
+  assert.equal((step("Prepare release PR").match(/github.event_name == 'workflow_dispatch'/g) || []).length, 3);
+  assert(workflow.indexOf("- name: Publish Hex members") < workflow.indexOf("- name: Tag approved release"));
+  assert(workflow.indexOf("- name: Tag approved release") < workflow.indexOf("- name: Record publication outcome"));
   assert(workflow.includes("queue: max") && workflow.includes("cancel-in-progress: false"));
   assert(workflow.includes("trellis-release-${{ github.repository }}"));
   assert(workflow.includes("ref: ${{ steps.select.outputs.publish_sha }}"));
   assert(workflow.includes("ref: ${{ inputs.base }}"));
   assert(workflow.includes("steps.prepare.outcome == 'success' && steps.gate.outputs.reservation_sha != ''"));
-  assert.equal((workflow.match(/hex_api_key: \$\{\{ secrets.hex_api_key \}\}/g) || []).length, 1);
+  assert.equal((workflow.match(/HEXPM_API_KEY: \$\{\{ secrets.hex_api_key \}\}/g) || []).length, 1);
   for (const line of workflow.split("\n").filter(l => /^\s*(?:-\s*)?uses:/.test(l))) {
     assert.match(line, /@[0-9a-f]{40} # ratchet:/);
   }
-  console.log("trellis release workflow: trust, ownership, recovery, and modes passed");
+  console.log("trellis release workflow: direct CLI, scoped auth, trust, ownership, recovery, and modes passed");
 }
 tests().catch(error => {console.error(error); process.exitCode = 1;});
