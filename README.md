@@ -138,6 +138,31 @@ or attach an archive. Include required workspace dependency paths in custom
 release artifacts. Never retry a completed old release to move series backward;
 the reusable release workflow guards that case.
 
+### trellis-check
+
+Run doctor annotations and a branch-scoped changelog check, finish both reports,
+then fail if either command fails. Inputs: `working_directory` (`.`),
+`check_changelog` (`true`), and required explicit `base`/`head` refs when enabled.
+Install trellis and fetch the required history before calling.
+
+```yaml
+- uses: tylerbutler/actions/trellis-check@main
+  with:
+    base: ${{ github.event.pull_request.base.sha }}
+    head: ${{ github.event.pull_request.head.sha }}
+```
+
+Outputs match trellis 1.3.0: `ok`, `strictness`, `has_entries`, `needs_entry`,
+`needs_entry_packages`, `invalid_fragments`, and `preview`. Arrays stay JSON.
+`ok` is the changelog verdict; it does not override a failed doctor. Missing
+verdicts fail. The summary includes the preview and command outcomes.
+`check_changelog: 'false'` runs doctor alone.
+
+Trellis owns fragment attribution and strictness (`error`, `warn`, `off`);
+invalid fragments fail under all policies. The action never runs doctor fixes
+and works on ordinary fork PRs with Contents read-only. A sticky comment is an
+optional caller step that needs its own Pull requests write permission.
+
 ### setup-licence-audit
 
 Install the released `licence_audit` escript and optionally set up Erlang/OTP.

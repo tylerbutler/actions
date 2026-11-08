@@ -1,0 +1,49 @@
+name: Trellis check
+description: Report doctor annotations and branch-scoped changelog checks before failing
+inputs:
+  working_directory:
+    description: Directory in the caller-owned trellis workspace
+    default: '.'
+  check_changelog:
+    description: Enable changelog checking with explicit base and head refs
+    default: 'true'
+  base:
+    description: Explicit changelog base ref or SHA (requires history)
+    default: ''
+  head:
+    description: Explicit changelog head ref or SHA
+    default: ''
+outputs:
+  ok:
+    description: Trellis changelog verdict (not the combined doctor verdict)
+    value: ${{ steps.check.outputs.ok }}
+  strictness:
+    description: Effective workspace changelog policy
+    value: ${{ steps.check.outputs.strictness }}
+  has_entries:
+    description: Whether the branch contains changelog entries
+    value: ${{ steps.check.outputs.has_entries }}
+  needs_entry:
+    description: Whether a changed package lacks an entry
+    value: ${{ steps.check.outputs.needs_entry }}
+  needs_entry_packages:
+    description: JSON array of packages lacking entries
+    value: ${{ steps.check.outputs.needs_entry_packages }}
+  invalid_fragments:
+    description: JSON array of invalid fragment diagnostics
+    value: ${{ steps.check.outputs.invalid_fragments }}
+  preview:
+    description: Rendered branch-scoped changelog preview
+    value: ${{ steps.check.outputs.preview }}
+runs:
+  using: composite
+  steps:
+    - name: Report workspace checks
+      id: check
+      shell: bash
+      env:
+        WORKING_DIRECTORY: ${{ inputs.working_directory }}
+        CHECK_CHANGELOG: ${{ inputs.check_changelog }}
+        BASE: ${{ inputs.base }}
+        HEAD: ${{ inputs.head }}
+      run: python3 "$GITHUB_ACTION_PATH/check.py"
