@@ -1,5 +1,5 @@
 name: 'Gleam Publish'
-description: 'Publish Gleam packages to Hex.pm in dependency order, skipping already-published versions'
+description: 'Legacy ordered-path Hex publisher; use trellis-publish for trellis lifecycle and bundle support'
 
 inputs:
   packages:

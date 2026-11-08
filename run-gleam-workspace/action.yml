@@ -1,5 +1,5 @@
 name: 'Run Gleam Workspace Command'
-description: 'Escape hatch: run a shell command sequentially in each package from read-gleam-workspace'
+description: 'Legacy shell-command escape hatch; trellis workspaces can use trellis run or trellis exec directly'
 
 inputs:
   packages:

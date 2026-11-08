@@ -9,6 +9,12 @@ Reusable composite actions for CI/CD workflows. Used across multiple repositorie
 | Action | Purpose |
 |--------|---------|
 | `setup-gleam` | Gleam/BEAM environment with caching |
+| `setup-trellis` | Checksum-verified exact release binary installation |
+| `trellis-workspace` | Trellis strategy matrix and JSON-array workspace facts |
+| `trellis-check` | Doctor annotations and branch-scoped TOML changelog checks |
+| `trellis-release-pr` | Stable/candidate/promotion preparation with scoped git/API auth |
+| `trellis-tag` | Release tag and GitHub release reconciliation |
+| `trellis-publish` | CLI-owned Hex lifecycle, bundle, validation, and retry behavior |
 | `setup-go` | Go environment with optional mise tool management |
 | `setup-rust` | Rust toolchain with caching |
 | `setup-node` | Node.js with pnpm/npm/yarn/bun |
@@ -85,6 +91,7 @@ Reusable workflows live in `.github/workflows/` and are called with `uses:` from
 | `release.yml` | High-level release orchestrator: PR changie check/comment, changie release PR creation, release PR auto-tagging, and Hex/Homebrew tag publishing |
 | `auto-tag.yml` | Tags releases when release PRs merge (wraps `changie-auto-tag` action) |
 | `gleam-workspace-ci.yml` | Matrix CI for Gleam monorepos using `read-gleam-workspace` |
+| `trellis-release.yml` | Trusted-merge publication and durable manual preparation ownership |
 
 ## Multi-Project Support
 
@@ -219,6 +226,10 @@ exclude = ["packages/my_lib_experimental"]
 This repo has no release process. Consumers pin to `@main`. There are no version tags.
 
 ## Internal conventions
+
+- Trellis actions use argument arrays and `_common/trellis.py` for process/output/auth helpers. Keep graph selection, release planning, publication, and tag reconciliation in the CLI. New trellis inputs/outputs use snake_case; legacy action contracts stay unchanged.
+- `gleam-workspace-ci.yml` requires explicit `trellis_version` for trellis mode. Configured tasks replace standard checks unless `trellis_task_with_checks` is enabled.
+- Controlled trellis integration tests use `TRELLIS_TEST_BIN`, loopback APIs, and fake Gleam. CI installs trellis 1.3.0 for these tests; tests must not publish to production Hex.
 
 - **Shared Python helpers** live in `_common/gha.py`. Action scripts inject `$GITHUB_ACTION_PATH/../_common` into `sys.path` and import from `gha` (`write_output`, `fail`, `append_summary`, `update_toml_file_key`, `parse_colon_entries`). Do not copy these helpers back into individual actions; add new ones to `_common/gha.py` with paired tests in `_common/test_gha.py`.
 
