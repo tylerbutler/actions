@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import subprocess
 import sys
+import re
 from pathlib import Path
 from typing import Callable
+from urllib.parse import urlparse
 
 from gha import append_summary, fail
 
@@ -68,6 +71,45 @@ def json_array(value: str) -> list[str]:
     if not isinstance(parsed, list) or any(not isinstance(item, str) for item in parsed):
         raise ValueError("workspace output must be a JSON array of strings")
     return parsed
+
+
+def authenticated_env(token: str) -> dict[str, str]:
+    if not token or any(char.isspace() for char in token):
+        raise ValueError("a nonempty token without whitespace is required")
+    print(f"::add-mask::{token}")
+    env = os.environ.copy()
+    env["GITHUB_TOKEN"] = token
+    env["GH_TOKEN"] = token
+    origin = subprocess.run(
+        ["git", "remote", "get-url", "origin"],
+        cwd=env.get("WORKING_DIRECTORY", "."), check=True, text=True, capture_output=True,
+    ).stdout.strip()
+    server = urlparse(env.get("GITHUB_SERVER_URL", "https://github.com"))
+    if server.scheme != "https" or not server.hostname or server.username or server.password:
+        raise ValueError("GITHUB_SERVER_URL must be an HTTPS GitHub server")
+    if origin.startswith(f"git@{server.hostname}:"):
+        repo = origin.split(":", 1)[1]
+    else:
+        parsed = urlparse(origin)
+        if parsed.hostname != server.hostname or parsed.scheme not in ("https", "ssh") \
+                or parsed.password or (parsed.scheme == "https" and parsed.username):
+            raise ValueError("origin must use the configured GitHub server without credentials")
+        repo = parsed.path.lstrip("/")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
+        raise ValueError("invalid GitHub origin repository")
+    url = f"{server.scheme}://{server.netloc}/{repo}"
+    header = "AUTHORIZATION: basic " + base64.b64encode(f"x-access-token:{token}".encode()).decode()
+    print(f"::add-mask::{header}")
+    count = int(env.get("GIT_CONFIG_COUNT", "0"))
+    # Reset checkout's persisted header before adding this action's scoped token.
+    settings = [(f"url.{url}.insteadOf", origin),
+                (f"http.{url}.extraheader", ""), (f"http.{url}.extraheader", header)]
+    for key, value in settings:
+        env[f"GIT_CONFIG_KEY_{count}"] = key
+        env[f"GIT_CONFIG_VALUE_{count}"] = value
+        count += 1
+    env["GIT_CONFIG_COUNT"] = str(count)
+    return env
 
 
 def main(name: str, action: Callable[[], None]) -> None:

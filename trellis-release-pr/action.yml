@@ -1,0 +1,38 @@
+name: Trellis release PR
+description: Prepare one trellis stable, candidate, or promotion release request
+inputs:
+  working_directory:
+    description: Directory in the clean caller-owned workspace
+    default: '.'
+  base:
+    description: Release base branch
+    default: main
+  branch:
+    description: Designated remote release branch (force-updated with lease)
+    default: release/pending
+  pre:
+    description: Candidate label, none for promotion, or empty for CLI default
+    default: ''
+  set:
+    description: Exact package=version overrides, one argument per nonblank line
+    default: ''
+  bump:
+    description: Bump overrides, one argument per nonblank line
+    default: ''
+  token:
+    description: GitHub token for authenticated git pushes and PR API operations
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Prepare release
+      shell: bash
+      env:
+        WORKING_DIRECTORY: ${{ inputs.working_directory }}
+        BASE: ${{ inputs.base }}
+        BRANCH: ${{ inputs.branch }}
+        PRE: ${{ inputs.pre }}
+        SET: ${{ inputs.set }}
+        BUMP: ${{ inputs.bump }}
+        TOKEN: ${{ inputs.token }}
+      run: python3 "$GITHUB_ACTION_PATH/release_pr.py"

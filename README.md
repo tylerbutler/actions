@@ -83,6 +83,34 @@ jobs:
 ref/SHA and full history; invalid refs, missing history, malformed outputs, and
 CLI errors fail instead of returning an empty successful selection.
 
+### trellis-release-pr
+
+Prepare a release with an installed trellis and a clean caller-owned checkout.
+Inputs: `working_directory` (`.`), `base` (`main`), `branch` (`release/pending`),
+`pre`, multiline `set` and `bump`, and required `token`. Each nonblank override
+line is one CLI argument. Empty `pre` leaves the CLI default; `pre: none`
+requests promotion. Trellis owns planning, candidate notes, stable rollup,
+commits, branch updates, and PR creation. The summary uses its structured
+outcome; this action exposes no scraped PR outputs.
+
+```yaml
+- uses: tylerbutler/actions/trellis-release-pr@main
+  with:
+    token: ${{ steps.app.outputs.token }}
+    pre: rc
+    set: |
+      my_package=1.3.0
+```
+
+Omit `pre` and overrides for stable preparation. After the first candidate
+merges and publishes, use `pre: rc` for the next candidate, then `pre: none`
+to promote. Serialize calls to this action: trellis force-updates the designated
+remote branch with a lease. It rejects caller changes instead of removing them.
+Use a repository-scoped App token with Contents and Pull requests read/write
+when pushes and PR creation must trigger ordinary CI. The action configures
+both authenticated git and API operations for its process without persisting
+credentials. Caller workflows own approval, concurrency, and prior-release gates.
+
 ### setup-licence-audit
 
 Install the released `licence_audit` escript and optionally set up Erlang/OTP.
