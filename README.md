@@ -18,6 +18,25 @@ Skipped or no-op runs still emit a section so the summary is a faithful record o
 
 ## Available Actions
 
+### setup-trellis
+
+Install an exact prebuilt trellis release, verify its checksum and version, and
+add its directory to the next step's `PATH`. `version` is required; `1.3.0` and
+`v1.3.0` select the same release. Outputs are `version` (without `v`) and `path`
+(the absolute binary path). Installation uses runner temporary storage, outside
+your checkout. There is no latest-version or source-build fallback.
+
+```yaml
+- uses: tylerbutler/actions/setup-trellis@main
+  with:
+    version: '1.3.0'
+- run: trellis doctor --format github
+```
+
+Supported binaries: Linux GNU x86_64/aarch64, macOS x86_64/aarch64, and Windows
+x86_64. Unsupported platforms and unavailable releases fail. You own checkout
+and Gleam/BEAM/Node setup; this action installs only trellis.
+
 ### setup-licence-audit
 
 Install the released `licence_audit` escript and optionally set up Erlang/OTP.
