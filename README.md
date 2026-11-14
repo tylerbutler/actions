@@ -289,8 +289,10 @@ and resolves them through `trellis ci tag-package --json`, including tags that
 already exist after a partial release.
 
 The coordinator installs the checksum-verified native Linux licence_audit
-release specified by `licence_audit_version`, without a Hex dependency or an
-OTP-28 escript. It runs `gleam deps download`, then
+release specified by `licence_audit_version`. Use an exact stable or prerelease
+version without the `v` prefix, such as `1.0.0` or `1.0.0-rc.2`. Version ranges
+and build metadata are not supported. Installation runs without a Hex dependency
+or an OTP-28 escript. It runs `gleam deps download`, then
 `licence_audit sbom --reproducible --output=priv/<package>.cdx.json` at the
 approved merge SHA with `SOURCE_DATE_EPOCH=0`. Commit `manifest.toml` and ignore
 the generated document. Generation receives no Hex, publication, or preparation

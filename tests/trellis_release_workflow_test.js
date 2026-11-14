@@ -168,7 +168,7 @@ if (name === "git") {
 } else if (name === "curl") {
   const url = args.find(arg => arg.startsWith("https://")), target = args[args.indexOf("-o")+1];
   if (url.startsWith("https://repo.hex.pm/")) copy(env.TEST_HEX || "package.tar", target);
-  else copy(url.endsWith("checksums.txt") ? "checksums.txt" : "${archive}", target);
+  else copy(path.basename(url), target);
 } else if (name === "trellis") {
   if (args[0] === "publish") {
     if (!fs.existsSync(path.join(root, "published"))) fs.writeFileSync(path.join(root, "published"), "1");
@@ -218,6 +218,23 @@ if (name === "git") {
     execute("Install native licence_audit", {}, 1);
     fs.writeFileSync(path.join(dir, "checksums.txt"), `${hash}  ${archive}\n`);
     execute("Install native licence_audit", {TEST_FAIL: "curl"}, 1);
+    const prerelease = "1.0.0-rc.2";
+    const prereleaseDir = path.join(dir, `licence_audit-v${prerelease}-x86_64-linux-glibc`);
+    const prereleaseArchive = `${path.basename(prereleaseDir)}.tar.gz`;
+    fs.mkdirSync(prereleaseDir);
+    fs.writeFileSync(path.join(prereleaseDir, "licence_audit"),
+      `#!/usr/bin/env bash\nprintf "${prerelease}\\n"\n`, {mode: 0o700});
+    command("tar", ["-czf", prereleaseArchive, path.basename(prereleaseDir)]);
+    const prereleaseHash = require("node:crypto").createHash("sha256")
+      .update(fs.readFileSync(path.join(dir, prereleaseArchive))).digest("hex");
+    fs.writeFileSync(path.join(dir, "checksums.txt"), `${prereleaseHash}  ${prereleaseArchive}\n`);
+    execute("Install native licence_audit", {LICENCE_AUDIT_VERSION: prerelease});
+    const prereleaseBase = `https://github.com/tylerbutler/licence_audit/releases/download/v${prerelease}`;
+    assert.deepEqual(calls().filter(c => c.name === "curl").slice(-2)
+      .map(c => c.args.find(arg => arg.startsWith("https://"))),
+      [`${prereleaseBase}/${prereleaseArchive}`, `${prereleaseBase}/checksums.txt`]);
+    fs.writeFileSync(path.join(dir, "checksums.txt"), `${"0".repeat(64)}  ${prereleaseArchive}\n`);
+    execute("Install native licence_audit", {LICENCE_AUDIT_VERSION: prerelease}, 1);
     execute("Generate and verify package SBOM", {RELEASE_SHA: OLD}, 1);
     execute("Generate and verify package SBOM", {TEST_FAIL: "licence_audit"}, 1);
     execute("Generate and verify package SBOM", {TEST_MUTATE_LOCK: "true"}, 1);
@@ -453,7 +470,14 @@ async function tests() {
   }
   await assert.rejects(run("select", {mode: "git_only",
     env: {SBOM_PACKAGE: "shelf", LICENCE_AUDIT_VERSION: "0.15.0"}}), /hex\/mixed/);
-  for (const version of ["latest", "v0.15.0", "0.15.0/other"]) {
+  for (const version of ["0.15.0", "1.0.0", "1.0.0-rc.2", "1.0.0-0", "1.0.0-alpha-beta.1"]) {
+    assert.equal((await run("select", {event: "pull_request",
+      env: {SBOM_PACKAGE: "shelf", LICENCE_AUDIT_VERSION: version}})).outputs.publish_sha, SHA);
+  }
+  for (const version of ["latest", "v0.15.0", "0.15.0/other", "v1.0.0-rc.2", "^1.0.0",
+    "1.0", "1.0.0-", "1.0.0-rc..2", "1.0.0-rc.", "1.0.0-01", "1.0.0-rc.02",
+    "1.0.0+build.1", "1.0.0-rc.2+build.1", " 1.0.0", "1.0.0\n", "1.0.0-rc.2\n",
+    "1.0.0-rc/2", "1.0.0-$(touch bad)", "1.0.0-rc;echo bad"]) {
     await assert.rejects(run("select", {env: {SBOM_PACKAGE: "shelf", LICENCE_AUDIT_VERSION: version}}), /exact/);
   }
   const packageList = {schema: "trellis.list/1", packages: [
