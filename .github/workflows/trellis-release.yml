@@ -41,7 +41,7 @@ on:
         type: string
         default: ''
       licence_audit_version:
-        description: Exact native licence_audit release version; required with sbom_package
+        description: Exact native licence_audit stable or prerelease version without v prefix; required with sbom_package
         type: string
         default: ''
     secrets:
@@ -102,7 +102,9 @@ jobs:
               if (mode === "git_only" || !/^[a-z][a-z0-9_]*$/.test(process.env.SBOM_PACKAGE)) {
                 throw new Error("sbom_package requires a root Hex package name and hex/mixed mode.");
               }
-              if (!/^\d+\.\d+\.\d+$/.test(process.env.LICENCE_AUDIT_VERSION || "")) {
+              const version = process.env.LICENCE_AUDIT_VERSION || "";
+              if (/\s/.test(version)
+                  || !/^\d+\.\d+\.\d+(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?$/.test(version)) {
                 throw new Error("SBOM generation requires an exact licence_audit_version.");
               }
             }
