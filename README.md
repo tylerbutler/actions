@@ -206,6 +206,13 @@ Call `.github/workflows/trellis-release.yml` from your trigger workflow. Require
 trellis 1.3.0, an explicit `release_mode` (`hex`, `git_only`, or `mixed`), and
 preparation App credentials. Optional inputs: `working_directory`, `base`
 (`main`), `release_branch` (`release/pending`), `pre`, multiline `set`/`bump`.
+`adopt_legacy_tags` defaults to `false`. With Trellis 1.7.0 or newer, set it
+to `true` to pass native `--force=adopt` when tagging an approved release.
+This permits adoption of ancestor repository series tags that predate the
+anchor manifest. It does not bypass exact-tag conflicts, malformed manifests,
+version rollback checks, or remote leases. Fetch full history. Leave it off
+unless the repository needs this migration; after adoption, versioned aliases
+follow the normal guarded reconciliation.
 Hex/mixed publication also requires pinned `gleam_version`, `erlang_version`,
 and `hex_api_key`. Git-only needs no Hex key or runtime installation.
 Optional SBOM inputs: `sbom_package` and `licence_audit_version`.
@@ -1931,25 +1938,91 @@ The installation token is minted per-run and expires in one hour — no rotation
 
 ## Versioning
 
-Use semantic versioning tags:
+All actions and reusable workflows share the version in `release.toml`.
+Trellis manages Git-only releases; this repository publishes no packages to
+Hex, npm, or another registry.
+
+After the first managed release, choose a consumer ref:
 
 ```yaml
-# Pin to major version (recommended)
-- uses: tylerbutler/actions/setup-gleam@main
+# Follow compatible releases in the major series
+- uses: tylerbutler/actions/setup-gleam@v1
 
-# Pin to specific version
-- uses: tylerbutler/actions/setup-gleam@main.0.0
+# Follow patch releases in the minor series
+- uses: tylerbutler/actions/setup-gleam@v1.0
 
-# Latest (not recommended for production)
+# Pin an immutable exact release
+- uses: tylerbutler/actions/setup-gleam@v1.0.0
+
+# Follow unreleased changes (not recommended for production)
 - uses: tylerbutler/actions/setup-gleam@main
 ```
 
+For a reviewed commit pin, use its full SHA, for example
+`tylerbutler/actions/setup-gleam@a425d262f1e33ecc8eac6462760d108eb5688d4a`.
+The same refs apply to other action paths and `.github/workflows/` consumers.
+Major and minor aliases move within their series; exact tags stay at their
+release commit.
+
+### First managed release
+
+The existing `v1` tag and its historical GitHub Release remain unchanged until
+the first managed release. `0.0.0` in `release.toml` is an unpublished bootstrap
+baseline. The initial fragment plans `v1.0.0`; its approved release PR will
+generate `CHANGELOG.md` and archived notes, create `v1.0.0` and `v1.0`, and
+advance `v1`. It will not replace the historical `v1` GitHub Release.
+
+The caller enables `adopt_legacy_tags` because the old `v1` predates the version
+manifest. Trellis 1.7.0 owns this migration through `--force=adopt`; normal
+version and ancestry guards still apply. No manual tag rewrite is needed.
+After the first release completes, maintainers can turn off this input.
+
 ## Contributing
 
-1. Make changes to action files
-2. Test locally using [act](https://github.com/nektos/act)
-3. Create PR with conventional commit message
-4. After merge, create a new release tag
+1. Make action changes and run the relevant existing checks.
+2. For user-facing changes, add a Trellis fragment. Documentation-only and
+   development-only changes need no entry.
+3. Open a PR with a conventional commit title. Review the release metadata
+   check and changelog preview.
+
+Install the tools in `.mise.toml` with `mise install`, then add a fragment:
+
+```sh
+mise exec -- trellis changelog new --package actions --kind Fixed \
+  --body "Describe the consumer-visible fix"
+mise exec -- trellis version plan --json
+```
+
+Use `Added` or `Changed` for minor releases, `Fixed` or `Security` for patch
+releases, and `Breaking` or `Removed` for major releases. Trellis selects the
+largest pending bump. Do not edit the release version or generated changelog
+by hand.
+
+CI runs doctor and a branch-scoped changelog preview with explicit comparison
+SHAs. Missing entries produce warnings because Trellis also counts root-level
+documentation and development edits. Invalid fragments still fail.
+
+### Maintainer release setup
+
+Before enabling releases, install a repository-scoped GitHub App with
+Contents, Pull requests, and Commit statuses read/write permissions. Set
+`RELEASE_APP_ID` and `RELEASE_APP_PRIVATE_KEY` as repository secrets.
+The App creates release PRs whose pushes trigger ordinary CI.
+
+`.github/workflows/release-actions.yml` calls this repository's existing
+Trellis coordinator with version `1.7.0` and `release_mode: git_only`.
+Pushes to `main` prepare or refresh `release/pending` from pending fragments.
+Review its version and changelog, wait for CI, then merge that release PR to
+approve tagging and a GitHub Release with notes. No registry credentials,
+package build, or tag-triggered publisher is needed. A manual dispatch on
+`main` can retry preparation; it does not publish a release.
+
+If tagging or release creation fails, rerun all jobs of the original merged
+release-PR run at its approved SHA. The coordinator blocks the next release
+until `trellis/release` succeeds. Do not dispatch from newer `main` to recover
+publication, move tags by hand, or retry a completed old release to move aliases
+backward. See [Approval, ownership, and recovery](#approval-ownership-and-recovery)
+for the coordinator's manual-request and recovery rules.
 
 ## License
 

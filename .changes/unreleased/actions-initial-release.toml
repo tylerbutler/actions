@@ -1,0 +1,3 @@
+package = "actions"
+kind = "Initial Release"
+body = "Release all actions and reusable workflows together with immutable exact version tags and floating major and minor tags."

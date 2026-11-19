@@ -1,0 +1,18 @@
+[tools.trellis]
+members = ["."]
+
+[tools.trellis.adapter]
+manifest = "release.toml"
+
+[tools.trellis.publish]
+package_tags = ["exact"]
+exact_tag_format = "v{version}"
+repository_tag_package = "actions"
+repository_tag_format = "v{series}"
+repository_tags = ["major", "minor"]
+
+[tools.trellis.publish.lifecycle]
+default = "git_only"
+
+[tools.trellis.changelog]
+strictness = "warn"
