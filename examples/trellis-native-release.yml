@@ -1,0 +1,206 @@
+# Copy into the consumer's .github/workflows directory. Pin the shared workflow
+# to one reviewed actions commit containing split-phase support before use.
+# Project-owned just recipes retain the consumer's native build/package policy.
+name: Qualified native release
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [closed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      pre:
+        description: Candidate label, none for promotion, or empty for stable
+        type: string
+        default: ''
+      set:
+        description: Exact package=version targets, one per line
+        type: string
+        default: ''
+      bump:
+        description: Bump overrides, one per line
+        type: string
+        default: ''
+
+permissions:
+  contents: write
+  pull-requests: read
+  statuses: write
+
+jobs:
+  select:
+    uses: tylerbutler/actions/.github/workflows/trellis-release.yml@main
+    with:
+      phase: select
+      trellis_version: '1.3.0'
+      release_mode: hex
+
+  native:
+    needs: select
+    if: needs.select.outputs.release_sha != '' && needs.select.outputs.complete != 'true'
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-24.04
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+          - target: x86_64-apple-darwin
+            os: macos-15-intel
+          - target: aarch64-apple-darwin
+            os: macos-15
+          - target: x86_64-pc-windows-msvc
+            os: windows-2025
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
+        with:
+          ref: ${{ needs.select.outputs.release_sha }}
+          persist-credentials: false
+      - uses: tylerbutler/actions/setup-gleam@9d2a7c45ab9c7e04a3ac35445f187840f126ac47 # ratchet:tylerbutler/actions/setup-gleam@main
+        with:
+          version-file: ''
+          gleam-version: '1.13.0'
+          erlang-version: '28'
+          run-deps: 'false'
+          cache: 'false'
+      - name: Native build and target proofs
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        # Recipe installs its native toolchain, builds priv/native/$TARGET,
+        # and runs that target's required tests. It receives no release secrets.
+        run: just release-native "$TARGET"
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # ratchet:actions/upload-artifact@v5
+        with:
+          name: native-${{ needs.select.outputs.release_sha }}-${{ github.run_attempt }}-${{ matrix.target }}
+          path: priv/native/*
+          if-no-files-found: error
+
+  assemble:
+    needs: [select, native]
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
+        with:
+          ref: ${{ needs.select.outputs.release_sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # ratchet:actions/download-artifact@v6
+        with:
+          pattern: native-${{ needs.select.outputs.release_sha }}-${{ github.run_attempt }}-*
+          path: qualified/overlay/priv/native
+          merge-multiple: true
+      - uses: tylerbutler/actions/setup-gleam@9d2a7c45ab9c7e04a3ac35445f187840f126ac47 # ratchet:tylerbutler/actions/setup-gleam@main
+        with:
+          version-file: ''
+          gleam-version: '1.13.0'
+          erlang-version: '28'
+          run-deps: 'false'
+          cache: 'false'
+      - name: Check complete Hex archive and seal the overlay
+        env:
+          RELEASE_SHA: ${{ needs.select.outputs.release_sha }}
+        run: |
+          cp -R qualified/overlay/. .
+          # Recipe exports qualified/package.tar and checks archive contents,
+          # all five targets, and Linux consumer behavior before sealing.
+          just release-check-package qualified/package.tar
+          python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          targets = [
+              "x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu",
+              "x86_64-apple-darwin", "aarch64-apple-darwin",
+              "x86_64-pc-windows-msvc",
+          ]
+          root = Path("qualified/overlay")
+          files = {p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+                   for p in sorted(root.rglob("*")) if p.is_file()}
+          by_target = {target: [p for p in files if p.startswith(f"priv/native/{target}/")]
+                       for target in targets}
+          if not all(by_target.values()):
+              raise SystemExit("Missing required native target files")
+          manifest = dict(schema="trellis.qualified_artifact/1",
+                          repository=os.environ["GITHUB_REPOSITORY"],
+                          release_sha=os.environ["RELEASE_SHA"],
+                          run_id=os.environ["GITHUB_RUN_ID"],
+                          run_attempt=os.environ["GITHUB_RUN_ATTEMPT"],
+                          targets=by_target, files=files)
+          Path("qualified/trellis-release.json").write_text(json.dumps(manifest))
+          PY
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # ratchet:actions/upload-artifact@v5
+        with:
+          name: package-${{ needs.select.outputs.release_sha }}-${{ github.run_attempt }}
+          path: qualified/
+          if-no-files-found: error
+
+  windows_consumer:
+    needs: [select, assemble]
+    permissions:
+      contents: read
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
+        with:
+          ref: ${{ needs.select.outputs.release_sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # ratchet:actions/download-artifact@v6
+        with:
+          name: package-${{ needs.select.outputs.release_sha }}-${{ github.run_attempt }}
+          path: qualified
+      - uses: tylerbutler/actions/setup-gleam@9d2a7c45ab9c7e04a3ac35445f187840f126ac47 # ratchet:tylerbutler/actions/setup-gleam@main
+        with:
+          version-file: ''
+          gleam-version: '1.13.0'
+          erlang-version: '28'
+          run-deps: 'false'
+          cache: 'false'
+      - name: Windows package consumer and relocation proofs
+        shell: bash
+        run: just release-windows-proof qualified/package.tar
+
+  publish:
+    needs: [select, native, assemble, windows_consumer]
+    if: >-
+      always() && !cancelled() && needs.select.result == 'success' &&
+      needs.select.outputs.release_sha != '' && needs.select.outputs.complete != 'true'
+    uses: tylerbutler/actions/.github/workflows/trellis-release.yml@main
+    with:
+      phase: publish
+      release_sha: ${{ needs.select.outputs.release_sha }}
+      trellis_version: '1.3.0'
+      release_mode: hex
+      gleam_version: '1.13.0'
+      erlang_version: '28'
+      required_jobs: '["native","assemble","windows_consumer"]'
+      qualification_results: ${{ toJSON(needs) }}
+      required_targets: >-
+        ["x86_64-unknown-linux-gnu","aarch64-unknown-linux-gnu",
+         "x86_64-apple-darwin","aarch64-apple-darwin","x86_64-pc-windows-msvc"]
+      package_artifact: package-${{ needs.select.outputs.release_sha }}-${{ github.run_attempt }}
+      artifact_paths: '["priv/native"]'
+    secrets:
+      hex_api_key: ${{ secrets.HEXPM_API_KEY }}
+
+  prepare:
+    needs: [select, publish]
+    if: >-
+      always() && !cancelled() && needs.select.result == 'success' &&
+      (needs.select.outputs.preparation_eligible == 'true' || needs.publish.outputs.complete == 'true')
+    uses: tylerbutler/actions/.github/workflows/trellis-release.yml@main
+    with:
+      phase: prepare
+      trellis_version: '1.3.0'
+      release_mode: hex
+      pre: ${{ inputs.pre }}
+      set: ${{ inputs.set }}
+      bump: ${{ inputs.bump }}
+    secrets:
+      app_id: ${{ secrets.RELEASE_APP_ID }}
+      app_private_key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}

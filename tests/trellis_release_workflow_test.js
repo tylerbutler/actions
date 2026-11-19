@@ -18,10 +18,12 @@ async function run(name, options = {}) {
   const outputs = {}, writes = [], commands = [], commandEnvs = [], secrets = [], summaries = [];
   const context = {repo: {owner: "example", repo: "repo"}, eventName: options.event || "push",
     ref: options.ref || "refs/heads/main", serverUrl: "https://github.com",
-    payload: {action: "closed", pull_request: options.eventPr || pr()}};
+    runId: 123, payload: {action: options.action || "closed", pull_request: options.eventPr || pr()}};
   const env = {RELEASE_BASE: "main", RELEASE_BRANCH: "release/pending", RELEASE_MODE: options.mode || "hex",
     GLEAM_VERSION: "1.13.0", ERLANG_VERSION: "28", WORKING_DIRECTORY: ".", RELEASE_SHA: SHA,
     PREPARATION_TOKEN: "test-token", PUBLICATION_TOKEN: "publish-token",
+    QUALIFICATION_OUTCOME: "success", REQUIRED_JOBS: "[]", QUALIFICATION_RESULTS: "{}",
+    GITHUB_RUN_ATTEMPT: "2", GITHUB_WORKSPACE: process.cwd(),
     PRE: "", SET: "", BUMP: "", ...options.env};
   const rest = {
     git: {getRef: async () => ({data: {object: {sha: options.baseSha || SHA}}})},
@@ -70,9 +72,9 @@ async function run(name, options = {}) {
     addRaw: text => {summaries.push(text); return summary;},
     write: async () => {},
   };
-  await new AsyncFunction("github", "context", "core", "exec", "process", source)(
+  await new AsyncFunction("github", "context", "core", "exec", "process", "require", source)(
     {rest, paginate}, context, {setOutput: (k,v) => outputs[k] = v, info: () => {},
-      setSecret: value => secrets.push(value), summary}, exec, {env});
+      setSecret: value => secrets.push(value), summary}, exec, {env}, require);
   return {outputs, writes, commands, commandEnvs, secrets, summaries};
 }
 
@@ -452,6 +454,7 @@ exit "$TEST_EXIT"
 }
 
 async function tests() {
+  await qualifiedReleaseTests();
   for (const mode of ["hex", "mixed", "git_only"]) {
     const selected = await run("select", {event: "pull_request", mode});
     assert.equal(selected.outputs.publish_sha, SHA);
@@ -543,10 +546,10 @@ async function tests() {
   assert.equal(earlyReservation.writes[0].state, "pending");
   await assert.rejects(run("select", {event: "workflow_dispatch", baseSha: "bad"}), /reservation base/);
   const fork = pr({head: {ref: "release/pending", repo: {full_name: "attacker/repo"}}});
-  assert.deepEqual((await run("select", {event: "pull_request", pr: fork})).outputs, {});
-  assert.deepEqual((await run("select", {event: "pull_request", pr: pr({merged: false})})).outputs, {});
-  assert.deepEqual((await run("select", {event: "pull_request",
-    pr: pr({base: {ref: "other", repo: {full_name: "example/repo"}}})})).outputs, {});
+  assert(!(await run("select", {event: "pull_request", pr: fork})).outputs.publish_sha);
+  assert(!(await run("select", {event: "pull_request", pr: pr({merged: false})})).outputs.publish_sha);
+  assert(!(await run("select", {event: "pull_request",
+    pr: pr({base: {ref: "other", repo: {full_name: "example/repo"}}})})).outputs.publish_sha);
   await assert.rejects(run("select", {event: "pull_request", eventPr: pr({merge_commit_sha: OLD})}), /merge state/);
   await assert.rejects(run("select", {event: "pull_request", comparison: "diverged"}), /not on/);
   await assert.rejects(run("select", {event: "pull_request",
@@ -554,7 +557,9 @@ async function tests() {
   const completedOld = await run("select", {event: "pull_request",
     statuses: {[SHA]: [{context: "trellis/release", state: "success"}]},
     closed: [pr({merge_commit_sha: OLD, merged_at: "2026-11-02"})]});
-  assert.deepEqual(completedOld.outputs, {prepare: "true"});
+  assert.equal(completedOld.outputs.prepare, "true");
+  assert.equal(completedOld.outputs.complete, "true");
+  assert(!completedOld.outputs.publish_sha);
   await assert.rejects(run("reserve-publication", {checkout: OLD}), /checkout changed/);
   assert.equal((await run("reserve-publication")).writes[0].state, "pending");
   const reserved = await run("reserve-publication", {origin: "https://github.com/example/repo.git"});
@@ -584,7 +589,8 @@ async function tests() {
   for (const mode of ["hex", "git_only", "mixed"]) {
     const failed = await run("publication-outcome", {mode, env: {TAG_OUTCOME: "failure", PUBLISH_OUTCOME: "success"}});
     assert.equal(failed.writes[0].state, "failure");
-    assert.deepEqual(failed.outputs, {});
+    assert.equal(failed.outputs.publication_state, "failed");
+    assert(!failed.outputs.complete);
     assert(failed.summaries.includes("Step outcome: `failure`.\n"));
   }
   const skipped = await run("publication-outcome", {env: {TAG_OUTCOME: "skipped", PUBLISH_OUTCOME: "failure"}});
@@ -699,5 +705,147 @@ async function tests() {
     assert.match(line, /@[0-9a-f]{40} # ratchet:/);
   }
   console.log("trellis release workflow: direct CLI, scoped auth, trust, ownership, recovery, and modes passed");
+}
+async function qualifiedReleaseTests() {
+  const selected = await run("select", {event: "pull_request", env: {RELEASE_PHASE: "select"}});
+  assert.equal(selected.outputs.release_sha, SHA);
+  assert.equal(selected.outputs.preparation_eligible, "false");
+  assert.equal(selected.outputs.publication_state, "pending");
+  assert(!selected.outputs.publish_sha, "Selection must not start publication");
+  assert.equal(selected.writes[0].state, "pending", "Qualification/cancellation must block new preparation");
+  for (const [status, state] of [["pending", "pending"], ["failure", "failed"], ["success", "completed"]]) {
+    const result = await run("select", {event: "pull_request",
+      env: {RELEASE_PHASE: "select"}, statuses: {[SHA]: [{context: "trellis/release", state: status}]}});
+    assert.equal(result.outputs.publication_state, status === "success" ? state : "pending");
+    assert.equal(result.outputs.preparation_eligible, String(status === "success"));
+    if (status === "success") assert.equal(result.writes.length, 0, "Completed retries are no-ops");
+  }
+  assert.equal((await run("select", {closed: [], env: {RELEASE_PHASE: "select"}}))
+    .outputs.preparation_eligible, "true");
+  const manual = await run("select", {event: "workflow_dispatch", closed: [],
+    env: {RELEASE_PHASE: "select", GLEAM_VERSION: "", ERLANG_VERSION: ""}});
+  assert.equal(manual.writes[0].context, "trellis/release_request");
+  assert.equal(manual.writes[0].state, "pending", "Split selection must reserve manual ownership before later jobs");
+  await assert.rejects(run("select", {env: {RELEASE_PHASE: "invalid"}}), /phase/);
+  for (const phase of ["publish", "complete"]) {
+    for (const changed of [pr({merged: false}),
+      pr({base: {ref: "other", repo: {full_name: "example/repo"}}}),
+      pr({head: {ref: "release/pending", repo: {full_name: "attacker/repo"}}})]) {
+      await assert.rejects(run("select", {event: "pull_request", pr: changed,
+        env: {RELEASE_PHASE: phase, EXPECTED_RELEASE_SHA: SHA}}), /no longer a trusted/);
+    }
+    await assert.rejects(run("select", {event: "pull_request", action: "opened",
+      env: {RELEASE_PHASE: phase, EXPECTED_RELEASE_SHA: SHA}}), /closed PR event/);
+    await assert.rejects(run("select", {event: "pull_request", env: {RELEASE_PHASE: phase}}), /requires/);
+    await assert.rejects(run("select", {event: "pull_request",
+      env: {RELEASE_PHASE: phase, EXPECTED_RELEASE_SHA: OLD}}), /does not match/);
+    await assert.rejects(run("select", {event: "pull_request", comparison: "behind",
+      env: {RELEASE_PHASE: phase, EXPECTED_RELEASE_SHA: SHA}}), /not on/);
+    await assert.rejects(run("select", {event: "pull_request",
+      closed: [pr({merge_commit_sha: OLD, merged_at: "2026-11-02"})],
+      env: {RELEASE_PHASE: phase, EXPECTED_RELEASE_SHA: SHA}}), /newer release/);
+    const result = await run("select", {event: "pull_request",
+      env: {RELEASE_PHASE: phase, EXPECTED_RELEASE_SHA: SHA}});
+    assert.equal(result.outputs.record_sha, SHA);
+    assert.equal(Boolean(result.outputs.publish_sha), phase === "publish");
+    const completed = await run("select", {event: "pull_request",
+      env: {RELEASE_PHASE: phase, EXPECTED_RELEASE_SHA: SHA},
+      statuses: {[SHA]: [{context: "trellis/release", state: "success"}]}});
+    assert.equal(completed.outputs.complete, "true");
+    assert(!completed.outputs.record_sha && !completed.outputs.publish_sha);
+  }
+  assert.equal((await run("select", {event: "pull_request",
+    env: {RELEASE_PHASE: "complete", EXPECTED_RELEASE_SHA: SHA, GLEAM_VERSION: "", ERLANG_VERSION: ""}}))
+    .outputs.record_sha, SHA, "Completion does not require the publication runtime");
+  const required = ["native", "assembly", "windows_consumer"];
+  const results = Object.fromEntries(required.map(job => [job, {result: "success"}]));
+  const qualification = extra => run("qualification", {env: {
+    PACKAGE_ARTIFACT: "native-package", REQUIRED_JOBS: JSON.stringify(required),
+    QUALIFICATION_RESULTS: JSON.stringify(results), ...extra}});
+  await qualification();
+  for (const job of required) {
+    for (const result of ["failure", "cancelled", "skipped", undefined]) {
+      await assert.rejects(qualification({QUALIFICATION_RESULTS: JSON.stringify({
+        ...results, [job]: result ? {result} : undefined,
+      })}), /did not succeed/);
+    }
+  }
+  await assert.rejects(qualification({REQUIRED_JOBS: "[]"}), /explicit required_jobs/);
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "trellis-qualified-")));
+  const checkout = path.join(dir, "checkout"), root = path.join(dir, "artifact");
+  fs.mkdirSync(checkout);
+  fs.mkdirSync(path.join(root, "overlay", "priv"), {recursive: true});
+  const bytes = Buffer.from("native-library");
+  fs.writeFileSync(path.join(root, "overlay", "priv", "lib.so"), bytes);
+  const manifest = {schema: "trellis.qualified_artifact/1", repository: "example/repo",
+    release_sha: SHA, run_id: "123", run_attempt: "2",
+    targets: {linux: ["priv/lib.so"]}, files: {
+      "priv/lib.so": require("node:crypto").createHash("sha256").update(bytes).digest("hex"),
+    }};
+  const assemble = async (value = manifest, env = {}) => {
+    fs.writeFileSync(path.join(root, "trellis-release.json"), JSON.stringify(value));
+    return run("artifact-assemble", {env: {WORKING_DIRECTORY: checkout, GITHUB_WORKSPACE: checkout,
+      ARTIFACT_DIRECTORY: root, REQUIRED_TARGETS: '["linux"]', ARTIFACT_PATHS: '["priv"]', ...env}});
+  };
+  try {
+    for (const change of [{release_sha: OLD}, {run_id: "122"}, {run_attempt: "1"},
+      {repository: "other/repo"}, {schema: "unsupported"}]) {
+      await assert.rejects(assemble({...manifest, ...change}), /revision\/run\/attempt/);
+    }
+    for (const targets of [{}, {linux: []}, {windows: ["priv/lib.so"]},
+      {linux: ["priv/missing.so"]}, {linux: ["priv/lib.so", "priv/lib.so"]},
+      {linux: ["priv/lib.so"], windows: ["priv/lib.so"]}]) {
+      await assert.rejects(assemble({...manifest, targets}), /target/);
+    }
+    await assert.rejects(assemble({...manifest, targets: {
+      linux: ["priv/lib.so"], windows: ["priv/lib.so"],
+    }}, {REQUIRED_TARGETS: '["linux","windows"]'}), /Duplicate native target/);
+    await assert.rejects(assemble({...manifest, files: {"priv/lib.so": "0".repeat(64)}}), /digest mismatch/);
+    await assert.rejects(assemble(manifest, {ARTIFACT_PATHS: '["src"]'}), /Unsafe overlay/);
+    assert(!fs.existsSync(path.join(checkout, "priv")), "Rejected artifacts must not modify checkout");
+    fs.writeFileSync(path.join(root, "overlay", "priv", "extra"), "unlisted");
+    await assert.rejects(assemble(), /inventory/);
+    fs.unlinkSync(path.join(root, "overlay", "priv", "extra"));
+    fs.symlinkSync(path.join(root, "overlay"), path.join(checkout, "priv"));
+    await assert.rejects(assemble(), /symlink/);
+    fs.unlinkSync(path.join(checkout, "priv"));
+    fs.symlinkSync(path.join(root, "overlay", "priv", "lib.so"), path.join(root, "overlay", "priv", "link"));
+    await assert.rejects(assemble(), /Unsafe artifact/);
+    fs.unlinkSync(path.join(root, "overlay", "priv", "link"));
+    await assert.rejects(assemble(manifest, {WORKING_DIRECTORY: dir}), /inside the checkout/);
+    await assemble();
+    assert.deepEqual(fs.readFileSync(path.join(checkout, "priv", "lib.so")), bytes);
+    await assemble(); // Original-revision retry can assemble the same bytes again.
+  } finally {
+    fs.rmSync(dir, {recursive: true, force: true});
+  }
+  const successful = {PUBLISH_OUTCOME: "success", TAG_OUTCOME: "success",
+    PACKAGE_ARTIFACT: "native-package", ASSEMBLY_OUTCOME: "success", QUALIFICATION_OUTCOME: "success"};
+  for (const key of ["QUALIFICATION_OUTCOME", "ASSEMBLY_OUTCOME", "PUBLISH_OUTCOME", "TAG_OUTCOME"]) {
+    for (const outcome of ["failure", "cancelled", "skipped", ""]) {
+      const failed = await run("publication-outcome", {env: {...successful, [key]: outcome}});
+      assert.equal(failed.writes[0].state, "failure", `${key}: ${outcome}`);
+      assert(!failed.outputs.complete);
+    }
+  }
+  const retry = await run("publication-outcome", {env: successful});
+  assert.equal(retry.writes[0].state, "success", "Hex success/tag failure retry can complete after reconciliation");
+  assert.equal(retry.outputs.complete, "true");
+  await assert.rejects(run("publication-outcome", {env: {
+    ...successful, RELEASE_PHASE: "complete", TAG_OUTCOME: "failure",
+  }}), /completion refused/);
+  assert.equal((await run("publication-outcome", {env: {
+    RELEASE_PHASE: "complete", TAG_OUTCOME: "success", PUBLISH_OUTCOME: "success",
+  }})).outputs.complete, "true");
+  for (const publication of ["failure", "cancelled"]) {
+    await assert.rejects(run("publication-outcome", {mode: "git_only", env: {
+      RELEASE_PHASE: "complete", TAG_OUTCOME: "success", PUBLISH_OUTCOME: publication,
+    }}), /completion refused/);
+  }
+  for (const publication of ["", "skipped"]) {
+    assert.equal((await run("publication-outcome", {mode: "git_only", env: {
+      RELEASE_PHASE: "complete", TAG_OUTCOME: "success", PUBLISH_OUTCOME: publication,
+    }})).outputs.complete, "true", "Publication-free Git-only completion permits absent/skipped publication");
+  }
 }
 tests().catch(error => {console.error(error); process.exitCode = 1;});

@@ -209,6 +209,7 @@ preparation App credentials. Optional inputs: `working_directory`, `base`
 Hex/mixed publication also requires pinned `gleam_version`, `erlang_version`,
 and `hex_api_key`. Git-only needs no Hex key or runtime installation.
 Optional SBOM inputs: `sbom_package` and `licence_audit_version`.
+Split-phase and native artifact inputs are described below.
 
 The coordinator invokes `trellis release pr --github-output`,
 `trellis publish --all-untagged`, and `trellis tag create --push --github-release`
@@ -264,6 +265,123 @@ For Git-only, use `release_mode: git_only` and omit the runtime inputs and Hex
 secret. Hex and mixed modes publish Hex members first, then tag all releasable
 members; workspace-only members have no release. Assemble Git-only artifacts in
 your own workflow. Do not add a second tag-triggered publisher to this recipe.
+
+#### Reusable selection and completion gates
+
+The same workflow supports `phase: all` (the default), `select`, `publish`,
+`prepare`, and `complete`. These are phases of the existing coordinator, not
+another release implementation. Use one reviewed Actions commit containing this
+interface for every call; the older pinned example above predates these inputs.
+
+| Phase | Contract |
+|-------|----------|
+| `select` | Check the current merged release PR, event identity, base ancestry, and latest release. Return its immutable `release_sha` and reserve pending qualification. Manual dispatch reserves preparation ownership immediately. No checkout or release secrets needed. |
+| `publish` | Require `release_sha`, recheck the live selection, gate required jobs, assemble an optional qualified artifact, then invoke Trellis publication, tagging, and completion. Does not prepare another PR. |
+| `prepare` | Apply the existing preceding-release, candidate, and manual-request ownership gates before preparing from current base. Requires App credentials. |
+| `complete` | For custom publication/tagging jobs: require `release_sha`, recheck selection and required jobs, and record their actual `publication_result` and `tagging_result`. No publication or preparation runs in this phase. |
+
+Outputs are `release_sha`, `preparation_eligible`, `publication_state`, and
+`complete`. Boolean outputs are strings. `publication_state` is `none` (no
+matching merged PR), `untracked` (no completion marker), `pending`, `failed`, or
+`completed`. Selection of an incomplete merged PR sets it to `pending`.
+`preparation_eligible` only reports whether the preceding release is complete;
+`prepare` still enforces candidate and manual ownership rules. Push/dispatch
+selection does not select a publication revision. A completed merge retry
+returns its SHA and `complete: 'true'` without publication or tag changes.
+
+Pass `required_jobs` as a nonempty JSON array of caller job IDs when qualification
+is required. Pass `qualification_results: ${{ toJSON(needs) }}` from a call job
+that directly needs **every** required matrix, complete-package, and consumer-proof
+job. Only `result: success` passes; missing, skipped, failed, and cancelled jobs
+block publication and completion. A matrix job's aggregate result must succeed.
+For custom publication, call `complete` with `always()` after those jobs and pass
+their real results, not literal success values. Include qualification, assembly,
+publication, and tagging jobs in `required_jobs`. A failed completion records
+failure and fails the call. Keep custom tagging dependent on successful publication.
+Use `publish` rather than `complete` for coordinator-owned artifact/SBOM handling.
+For publication-free `git_only` custom pipelines, `complete` accepts an absent or
+`skipped` `publication_result`. An explicit failure or cancellation blocks
+completion, including in `git_only` mode. Hex/mixed mode requires `success`.
+
+All phases retain the repository-wide coordinator queue. Keep one coordinator
+trigger workflow per consumer. Permissions remain `contents: write`,
+`pull-requests: read`, and `statuses: write`.
+App secrets are required only for preparation; Hex secrets only for publication.
+The optional `publication_token` replaces the workflow token for existing Git
+and lifecycle API operations. Artifact access uses the native action's same-run
+artifact-service token; it needs no additional API token or permission.
+Do not pass either publication or App secrets to qualification jobs.
+
+Recover by rerunning **all jobs of the original merged-PR workflow run**, not by
+dispatching from newer main or rerunning only failed publication jobs. Every
+checkout must use the selected SHA. Selection and publication both recheck live
+PR state; an incomplete superseded release cannot be recovered through a stale
+event. Required qualification reruns at the original revision on each attempt.
+Cancellation can leave a pending marker if the runner cannot record failure;
+pending still blocks new preparation. Partial Hex success or a tagging failure
+leaves the release incomplete; Trellis retries reconcile existing Hex versions,
+exact tags, and GitHub Releases. Completed retries skip the native pipeline too.
+For pre-marker releases, use the historical verification and status-seeding
+procedure in [Recovery](#approval-ownership-and-recovery); never seed partial
+publication as complete.
+
+#### Qualified native package contract
+
+See the [five-target native consumer example](examples/trellis-native-release.yml).
+It keeps Linux glibc x64/ARM64, macOS x64/ARM64, and Windows x64 checks in native
+jobs, then complete-package and Windows relocation proofs before publication.
+Replace its three project-owned `just` recipes with existing consumer checks, or
+call existing reusable CI workflows with the same selected SHA and artifact
+naming contract. The example is a template, not an installed native toolchain.
+It preserves the consumer's Hex inclusion policy and version/tag configuration.
+
+Configure `package_artifact`, `required_jobs`, `qualification_results`,
+`required_targets` (a nonempty JSON array), and `artifact_paths` (allowed overlay
+directories relative to `working_directory`, default `["priv"]`). The publisher
+downloads the named immutable artifact from the **same workflow run**, including
+across reusable workflow calls. Use `actions/upload-artifact` v4 or newer and
+include both the selected SHA and `github.run_attempt` in its name. No cross-run
+download inputs or shell extension are exposed. A missing or expired artifact
+fails the download.
+
+The artifact contains `trellis-release.json` and `overlay/`. The manifest shape is:
+
+```json
+{
+  "schema": "trellis.qualified_artifact/1",
+  "repository": "owner/repo",
+  "release_sha": "40-lowercase-hex-characters",
+  "run_id": "123",
+  "run_attempt": "2",
+  "targets": {"linux-x64": ["priv/native/linux-x64/library.so"]},
+  "files": {"priv/native/linux-x64/library.so": "64-lowercase-hex-sha256-characters"}
+}
+```
+
+`files` lists every overlay file and its SHA-256 digest. `targets` must contain
+exactly the configured targets, each with a nonempty list of files present in
+`files`. Include shared support files in `files` too. Paths use `/`, must stay
+under the allowed directories, and cannot contain traversal, `.git`, or symlinks.
+Target file lists must be disjoint; one native file cannot stand in for two targets.
+The publisher checks repository, SHA, run, attempt, the full file inventory, and
+all digests before copying any file. It also checks the immutable checkout and
+rejects destination symlinks. Artifact files are data: the publisher never runs
+an assembly script supplied by the caller. Upload/download normalizes file
+permissions; package shared libraries/data, not executables that need preserved
+Unix modes.
+
+Caller workflow definitions and their package proofs are trusted configuration:
+they must check out the selected SHA, inventory all required targets, and test
+the assembled archive rather than unrelated builds. The example keeps all
+artifact-producing and proof jobs free of release credentials. The credentialed
+publisher installs no caller extension code, overlays only allowed package data,
+then runs the existing Trellis commands. Do not use `secrets: inherit` for native
+jobs, grant them write permissions, or restore unqualified native build caches.
+If SBOM support is also enabled, reserve its generated path for the coordinator.
+Publication and any SBOM verification must succeed before tags; completion is last.
+For package-scoped draft releases with staged assets, keep asset-aware tagging
+and finalization in custom jobs and then call `complete`. The default `publish`
+phase keeps the existing unscoped tag command; it does not finalize package drafts.
 
 #### Package SBOM
 
