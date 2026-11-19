@@ -2,6 +2,42 @@ name: Trellis release
 on:
   workflow_call:
     inputs:
+      phase:
+        description: all, select, publish, prepare, or complete; split phases reuse the same lifecycle gates
+        type: string
+        default: all
+      release_sha:
+        description: Selected immutable merge SHA; required for publish and complete
+        type: string
+        default: ''
+      required_jobs:
+        description: JSON array of required caller job IDs (including assembly and consumer proofs)
+        type: string
+        default: '[]'
+      qualification_results:
+        description: toJSON(needs) from the caller; every required job must have result success
+        type: string
+        default: '{}'
+      required_targets:
+        description: JSON array of native target names in the qualified artifact
+        type: string
+        default: '[]'
+      package_artifact:
+        description: Same-run artifact containing trellis-release.json and a package overlay
+        type: string
+        default: ''
+      artifact_paths:
+        description: JSON array of allowed overlay directories, relative to working_directory
+        type: string
+        default: '["priv"]'
+      publication_result:
+        description: For complete only; actual custom publication job result
+        type: string
+        default: ''
+      tagging_result:
+        description: For complete only; actual custom tagging job result
+        type: string
+        default: ''
       trellis_version:
         description: Exact trellis release version (1.3.0 or newer compatible release)
         required: true
@@ -46,14 +82,26 @@ on:
         default: ''
     secrets:
       app_id:
-        required: true
+        required: false
       app_private_key:
-        required: true
+        required: false
       publication_token:
         description: Optional publication token; defaults to the workflow token
         required: false
       hex_api_key:
         required: false
+    outputs:
+      release_sha:
+        description: Selected release PR merge SHA, including a completed retry
+        value: ${{ jobs.release.outputs.release_sha }}
+      preparation_eligible:
+        description: No preceding incomplete release; preparation still applies candidate/manual ownership checks
+        value: ${{ jobs.release.outputs.preparation_eligible }}
+      publication_state:
+        description: none, untracked, pending, failed, or completed
+        value: ${{ jobs.release.outputs.publication_state }}
+      complete:
+        value: ${{ jobs.release.outputs.complete }}
 
 concurrency:
   group: trellis-release-${{ github.repository }}
@@ -68,11 +116,17 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    outputs:
+      release_sha: ${{ steps.select.outputs.release_sha }}
+      preparation_eligible: ${{ steps.select.outputs.preparation_eligible }}
+      publication_state: ${{ steps.publication.outputs.publication_state || steps.select.outputs.publication_state }}
+      complete: ${{ steps.publication.outputs.complete || steps.select.outputs.complete }}
     env:
       RELEASE_BASE: ${{ inputs.base }}
       RELEASE_BRANCH: ${{ inputs.release_branch }}
       RELEASE_MODE: ${{ inputs.release_mode }}
       WORKING_DIRECTORY: ${{ inputs.working_directory }}
+      RELEASE_PHASE: ${{ inputs.phase }}
     steps:
       - name: Select trusted release
         id: select
@@ -82,6 +136,7 @@ jobs:
           ERLANG_VERSION: ${{ inputs.erlang_version }}
           SBOM_PACKAGE: ${{ inputs.sbom_package }}
           LICENCE_AUDIT_VERSION: ${{ inputs.licence_audit_version }}
+          EXPECTED_RELEASE_SHA: ${{ inputs.release_sha }}
         with:
           github-token: ${{ secrets.publication_token || github.token }}
           script: |
@@ -90,12 +145,21 @@ jobs:
             const base = process.env.RELEASE_BASE;
             const branch = process.env.RELEASE_BRANCH;
             const mode = process.env.RELEASE_MODE;
+            const phase = process.env.RELEASE_PHASE || "all";
+            if (!["all", "select", "publish", "prepare", "complete"].includes(phase)) {
+              throw new Error("Invalid release phase.");
+            }
+            if (["publish", "complete"].includes(phase)
+                && !/^[0-9a-f]{40}$/.test(process.env.EXPECTED_RELEASE_SHA || "")) {
+              throw new Error("publish/complete requires the selected release_sha.");
+            }
             if (!["hex", "git_only", "mixed"].includes(mode)) throw new Error("Invalid release_mode.");
             if (!base || !branch || base === branch || /[\s~^:?*\\[]/.test(base + branch)
                 || base.startsWith("-") || branch.startsWith("-")) throw new Error("Invalid release branches.");
             await exec.getExecOutput("git", ["check-ref-format", "--branch", base]);
             await exec.getExecOutput("git", ["check-ref-format", "--branch", branch]);
-            if (mode !== "git_only" && (!process.env.GLEAM_VERSION || !process.env.ERLANG_VERSION)) {
+            if (["all", "publish"].includes(phase) && mode !== "git_only"
+                && (!process.env.GLEAM_VERSION || !process.env.ERLANG_VERSION)) {
               throw new Error("Hex/mixed publication requires gleam_version and erlang_version.");
             }
             if (process.env.SBOM_PACKAGE) {
@@ -111,20 +175,46 @@ jobs:
             const sameRepo = pr => pr.head.ref === branch && pr.base.ref === base
               && pr.head.repo?.full_name === `${repo.owner}/${repo.repo}`
               && pr.base.repo?.full_name === `${repo.owner}/${repo.repo}`;
+            const closed = await github.paginate(github.rest.pulls.list, {
+              ...repo, state: "closed", base, sort: "updated", direction: "desc",
+            });
+            const latest = closed.filter(p => p.merged_at && sameRepo(p))
+              .sort((a,b) => Date.parse(b.merged_at) - Date.parse(a.merged_at))[0];
+            const state = async sha => {
+              const statuses = await github.paginate(github.rest.repos.listCommitStatusesForRef, {...repo, ref: sha});
+              const status = statuses.find(s => s.context === "trellis/release")?.state;
+              return status === "success" ? "completed" : ["failure", "error"].includes(status) ? "failed"
+                : status === "pending" ? "pending" : "untracked";
+            };
+            const latestState = latest ? await state(latest.merge_commit_sha) : "none";
+            core.setOutput("preparation_eligible", String(!latest || latestState === "completed"));
+            core.setOutput("publication_state", latestState);
             if (context.eventName === "pull_request") {
-              if (context.payload.action !== "closed") return;
+              if (context.payload.action !== "closed") {
+                if (["publish", "complete"].includes(phase)) throw new Error("Publication requires a closed PR event.");
+                return;
+              }
               const event = context.payload.pull_request;
               const {data: pr} = await github.rest.pulls.get({...repo, pull_number: event.number});
-              if (!pr.merged || !sameRepo(pr)) return;
+              if (!pr.merged || !sameRepo(pr)) {
+                if (["publish", "complete"].includes(phase)) {
+                  throw new Error("Selected PR is no longer a trusted merged release.");
+                }
+                return;
+              }
               if (!/^[0-9a-f]{40}$/.test(pr.merge_commit_sha || "")
                   || pr.merge_commit_sha !== event.merge_commit_sha || !event.merged
                   || !sameRepo(event)) throw new Error("Release event does not match trusted merge state.");
-              const statuses = await github.paginate(github.rest.repos.listCommitStatusesForRef, {
-                ...repo, ref: pr.merge_commit_sha,
-              });
-              if (statuses.find(s => s.context === "trellis/release")?.state === "success") {
+              if (process.env.EXPECTED_RELEASE_SHA && process.env.EXPECTED_RELEASE_SHA !== pr.merge_commit_sha) {
+                throw new Error("Selected release_sha does not match the trusted merge.");
+              }
+              core.setOutput("release_sha", pr.merge_commit_sha);
+              const publicationState = await state(pr.merge_commit_sha);
+              core.setOutput("publication_state", publicationState);
+              if (publicationState === "completed") {
                 core.info("Completed release: skip publication and tagging; recover current-base preparation.");
-                core.setOutput("prepare", "true");
+                core.setOutput("complete", "true");
+                if (["all", "prepare"].includes(phase)) core.setOutput("prepare", "true");
                 return;
               }
               const {data: comparison} = await github.rest.repos.compareCommitsWithBasehead({
@@ -133,16 +223,21 @@ jobs:
               if (!["ahead", "identical"].includes(comparison.status)) {
                 throw new Error("Approved merge is not on the configured base.");
               }
-              const closed = await github.paginate(github.rest.pulls.list, {
-                ...repo, state: "closed", base, sort: "updated", direction: "desc",
-              });
-              const latest = closed.filter(p => p.merged_at && sameRepo(p))
-                .sort((a,b) => Date.parse(b.merged_at) - Date.parse(a.merged_at))[0];
               if (!latest || latest.merge_commit_sha !== pr.merge_commit_sha) {
                 throw new Error("A newer release exists; do not publish stale release state.");
               }
-              core.setOutput("publish_sha", pr.merge_commit_sha);
+              if (phase === "prepare") return;
+              if (["all", "publish"].includes(phase)) core.setOutput("publish_sha", pr.merge_commit_sha);
+              if (["all", "publish", "complete"].includes(phase)) core.setOutput("record_sha", pr.merge_commit_sha);
+              if (phase === "select") {
+                await github.rest.repos.createCommitStatus({
+                  ...repo, sha: pr.merge_commit_sha, context: "trellis/release", state: "pending",
+                  description: "Qualification reserved; recover this merge run if interrupted",
+                });
+                core.setOutput("publication_state", "pending");
+              }
             } else if (["push", "workflow_dispatch"].includes(context.eventName)) {
+              if (["publish", "complete"].includes(phase)) throw new Error("Publication requires a merged PR event.");
               if (context.ref !== `refs/heads/${base}`) throw new Error("Prepare on the configured base branch.");
               if (context.eventName === "workflow_dispatch") {
                 const {data: ref} = await github.rest.git.getRef({...repo, ref: `heads/${base}`});
@@ -153,14 +248,38 @@ jobs:
                   description: "Manual request reserved before checkout, installation, and preparation",
                 });
               }
-              core.setOutput("prepare", "true");
+              if (phase !== "select") core.setOutput("prepare", "true");
             } else {
               throw new Error("Unsupported release event.");
             }
             // end-script
 
+      - name: Validate required qualification jobs
+        id: qualification
+        if: steps.select.outputs.record_sha != ''
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # ratchet:actions/github-script@v9
+        env:
+          REQUIRED_JOBS: ${{ inputs.required_jobs }}
+          QUALIFICATION_RESULTS: ${{ inputs.qualification_results }}
+          PACKAGE_ARTIFACT: ${{ inputs.package_artifact }}
+        with:
+          script: |
+            // script: qualification
+            const required = JSON.parse(process.env.REQUIRED_JOBS);
+            const results = JSON.parse(process.env.QUALIFICATION_RESULTS);
+            if (!Array.isArray(required) || required.some(job => typeof job !== "string" || !job)
+                || new Set(required).size !== required.length || !results || Array.isArray(results)
+                || typeof results !== "object") throw new Error("Invalid required qualification jobs.");
+            if (process.env.PACKAGE_ARTIFACT && required.length === 0) {
+              throw new Error("Qualified artifacts require explicit required_jobs.");
+            }
+            for (const job of required) {
+              if (results[job]?.result !== "success") throw new Error(`Required qualification did not succeed: ${job}`);
+            }
+            // end-script
+
       - name: Check out approved merge
-        if: steps.select.outputs.publish_sha != ''
+        if: steps.select.outputs.publish_sha != '' && (inputs.phase == 'all' || inputs.phase == 'publish')
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
         with:
           ref: ${{ steps.select.outputs.publish_sha }}
@@ -169,14 +288,14 @@ jobs:
           persist-credentials: false
 
       - name: Install publication trellis
-        if: steps.select.outputs.publish_sha != ''
+        if: steps.select.outputs.publish_sha != '' && (inputs.phase == 'all' || inputs.phase == 'publish')
         uses: tylerbutler/actions/setup-trellis@9d2a7c45ab9c7e04a3ac35445f187840f126ac47 # ratchet:tylerbutler/actions/setup-trellis@main
         with:
           version: ${{ inputs.trellis_version }}
 
       - name: Verify checkout and reserve publication
         id: reserve
-        if: steps.select.outputs.publish_sha != ''
+        if: steps.select.outputs.publish_sha != '' && (inputs.phase == 'all' || inputs.phase == 'publish')
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # ratchet:actions/github-script@v9
         env:
           RELEASE_SHA: ${{ steps.select.outputs.publish_sha }}
@@ -201,6 +320,113 @@ jobs:
               ...context.repo, sha, context: "trellis/release", state: "pending",
               description: "Publication and tagging started",
             });
+            // end-script
+
+      - name: Download qualified package artifact
+        id: download_artifact
+        if: steps.select.outputs.publish_sha != '' && inputs.package_artifact != ''
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # ratchet:actions/download-artifact@v6
+        with:
+          name: ${{ inputs.package_artifact }}
+          path: ${{ runner.temp }}/trellis-qualified-package
+
+      - name: Verify and assemble qualified package
+        id: assembly
+        if: steps.download_artifact.outcome == 'success'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # ratchet:actions/github-script@v9
+        env:
+          RELEASE_SHA: ${{ steps.select.outputs.publish_sha }}
+          REQUIRED_TARGETS: ${{ inputs.required_targets }}
+          ARTIFACT_PATHS: ${{ inputs.artifact_paths }}
+          ARTIFACT_DIRECTORY: ${{ runner.temp }}/trellis-qualified-package
+        with:
+          script: |
+            // script: artifact-assemble
+            const fs = require("node:fs/promises");
+            const path = require("node:path");
+            const {createHash} = require("node:crypto");
+            const root = process.env.ARTIFACT_DIRECTORY;
+            for (const directory of [root, path.join(root, "overlay")]) {
+              if (!(await fs.lstat(directory)).isDirectory()) throw new Error("Unsafe artifact directory.");
+            }
+            const manifestPath = path.join(root, "trellis-release.json");
+            if (!(await fs.lstat(manifestPath)).isFile()) throw new Error("Unsafe artifact manifest.");
+            const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
+            const repository = `${context.repo.owner}/${context.repo.repo}`;
+            if (manifest.schema !== "trellis.qualified_artifact/1" || manifest.repository !== repository
+                || manifest.release_sha !== process.env.RELEASE_SHA
+                || manifest.run_id !== String(context.runId)
+                || manifest.run_attempt !== process.env.GITHUB_RUN_ATTEMPT) {
+              throw new Error("Qualified artifact revision/run/attempt does not match this release.");
+            }
+            const safe = value => typeof value === "string" && value.length > 0
+              && !value.includes("\\") && !value.includes("\0") && !path.posix.isAbsolute(value)
+              && value.split("/").every(part => part && part !== "." && part !== ".." && part !== ".git");
+            const required = JSON.parse(process.env.REQUIRED_TARGETS);
+            const allowed = JSON.parse(process.env.ARTIFACT_PATHS);
+            if (!Array.isArray(required) || required.length === 0 || required.some(t => !safe(t))
+                || new Set(required).size !== required.length
+                || !Array.isArray(allowed) || !allowed.length || allowed.some(p => !safe(p))) {
+              throw new Error("Require explicit native targets and safe artifact_paths.");
+            }
+            if (!manifest.targets || Array.isArray(manifest.targets) || typeof manifest.targets !== "object"
+                || Object.keys(manifest.targets).length !== required.length
+                || required.some(target => !Array.isArray(manifest.targets[target]) || !manifest.targets[target].length)) {
+              throw new Error("Missing or unexpected qualified native target.");
+            }
+            if (!manifest.files || Array.isArray(manifest.files) || typeof manifest.files !== "object"
+                || !Object.keys(manifest.files).length) throw new Error("Empty qualified package.");
+            const claimed = new Set();
+            for (const files of Object.values(manifest.targets)) {
+              for (const file of files) {
+                if (!safe(file) || !Object.hasOwn(manifest.files, file)) throw new Error("Missing target file.");
+                if (claimed.has(file)) throw new Error("Duplicate native target file.");
+                claimed.add(file);
+              }
+            }
+            const actual = [];
+            const walk = async (directory, prefix = "") => {
+              for (const entry of await fs.readdir(directory, {withFileTypes: true})) {
+                const name = prefix + entry.name;
+                if (!safe(name) || entry.isSymbolicLink()) throw new Error("Unsafe artifact entry.");
+                if (entry.isDirectory()) await walk(path.join(directory, entry.name), name + "/");
+                else if (entry.isFile()) actual.push(name);
+                else throw new Error("Unsupported artifact entry.");
+              }
+            };
+            await walk(path.join(root, "overlay"));
+            if (JSON.stringify(actual.sort()) !== JSON.stringify(Object.keys(manifest.files).sort())) {
+              throw new Error("Qualified artifact file inventory differs from manifest.");
+            }
+            const destination = path.resolve(process.env.WORKING_DIRECTORY);
+            const workspace = await fs.realpath(process.env.GITHUB_WORKSPACE);
+            const resolved = await fs.realpath(destination);
+            if (resolved !== destination || (resolved !== workspace && !resolved.startsWith(workspace + path.sep))) {
+              throw new Error("Package directory must be inside the checkout without symlinks.");
+            }
+            const head = await exec.getExecOutput("git", ["rev-parse", "HEAD"]);
+            if (head.stdout.trim() !== process.env.RELEASE_SHA) throw new Error("Release checkout changed.");
+            for (const file of actual) {
+              if (!safe(file) || !allowed.some(p => file.startsWith(p + "/"))
+                  || !/^[0-9a-f]{64}$/.test(manifest.files[file])) throw new Error("Unsafe overlay file or digest.");
+              const content = await fs.readFile(path.join(root, "overlay", file));
+              if (createHash("sha256").update(content).digest("hex") !== manifest.files[file]) {
+                throw new Error(`Qualified artifact digest mismatch: ${file}`);
+              }
+              // Reject checkout symlinks before writing through any existing path component.
+              let current = destination;
+              for (const part of file.split("/")) {
+                current = path.join(current, part);
+                try {
+                  if ((await fs.lstat(current)).isSymbolicLink()) throw new Error("Unsafe checkout symlink.");
+                } catch (error) { if (error.code !== "ENOENT") throw error; }
+              }
+            }
+            for (const file of actual) {
+              const target = path.join(destination, file);
+              await fs.mkdir(path.dirname(target), {recursive: true});
+              await fs.copyFile(path.join(root, "overlay", file), target);
+            }
             // end-script
 
       - name: Setup Hex runtime
@@ -429,12 +655,15 @@ jobs:
 
       - name: Record publication outcome
         id: publication
-        if: always() && steps.select.outputs.publish_sha != ''
+        if: always() && steps.select.outputs.record_sha != ''
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # ratchet:actions/github-script@v9
         env:
-          RELEASE_SHA: ${{ steps.select.outputs.publish_sha }}
-          TAG_OUTCOME: ${{ steps.tag.outcome }}
-          PUBLISH_OUTCOME: ${{ steps.publish.outcome }}
+          RELEASE_SHA: ${{ steps.select.outputs.record_sha }}
+          TAG_OUTCOME: ${{ inputs.phase == 'complete' && inputs.tagging_result || steps.tag.outcome }}
+          PUBLISH_OUTCOME: ${{ inputs.phase == 'complete' && inputs.publication_result || steps.publish.outcome }}
+          QUALIFICATION_OUTCOME: ${{ steps.qualification.outcome }}
+          PACKAGE_ARTIFACT: ${{ inputs.package_artifact }}
+          ASSEMBLY_OUTCOME: ${{ steps.assembly.outcome }}
           SBOM_PACKAGE: ${{ inputs.sbom_package }}
           GENERATE_SBOM_OUTCOME: ${{ steps.generate_sbom.outcome }}
           HEX_SBOM_OUTCOME: ${{ steps.hex_sbom.outcome }}
@@ -443,14 +672,22 @@ jobs:
           github-token: ${{ secrets.publication_token || github.token }}
           script: |
             // script: publication-outcome
+            const publishOutcome = process.env.PUBLISH_OUTCOME || "";
+            const publicationComplete = publishOutcome === "success"
+              || (process.env.RELEASE_MODE === "git_only"
+                && (process.env.RELEASE_PHASE !== "complete" || ["", "skipped"].includes(publishOutcome)));
             const complete = process.env.TAG_OUTCOME === "success"
-              && (process.env.RELEASE_MODE === "git_only" || process.env.PUBLISH_OUTCOME === "success")
+              && process.env.QUALIFICATION_OUTCOME === "success"
+              && (!process.env.PACKAGE_ARTIFACT || process.env.ASSEMBLY_OUTCOME === "success")
+              && publicationComplete
               && (!process.env.SBOM_PACKAGE || [process.env.GENERATE_SBOM_OUTCOME,
                 process.env.HEX_SBOM_OUTCOME, process.env.RELEASE_SBOM_OUTCOME].every(o => o === "success"));
             const outcomes = [
+              ["Required qualification", process.env.QUALIFICATION_OUTCOME],
               ["Trellis publish", process.env.PUBLISH_OUTCOME],
               ["Trellis tag", process.env.TAG_OUTCOME],
             ];
+            if (process.env.PACKAGE_ARTIFACT) outcomes.push(["Qualified package assembly", process.env.ASSEMBLY_OUTCOME]);
             if (process.env.SBOM_PACKAGE) outcomes.push(
               ["Package SBOM", process.env.GENERATE_SBOM_OUTCOME],
               ["Published Hex SBOM", process.env.HEX_SBOM_OUTCOME],
@@ -466,10 +703,14 @@ jobs:
               description: complete ? "Publication and tagging complete" : "Recover at the approved merge SHA",
             });
             if (complete) core.setOutput("complete", "true");
+            core.setOutput("publication_state", complete ? "completed" : "failed");
+            if (!complete && process.env.RELEASE_PHASE === "complete") {
+              throw new Error("Required release work did not succeed; completion refused.");
+            }
             // end-script
 
       - name: Create preparation App token
-        if: steps.select.outputs.prepare == 'true' || steps.publication.outputs.complete == 'true'
+        if: steps.select.outputs.prepare == 'true' || (inputs.phase == 'all' && steps.publication.outputs.complete == 'true')
         id: app
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # ratchet:actions/create-github-app-token@v3
         with:
@@ -479,7 +720,7 @@ jobs:
           repositories: ${{ github.event.repository.name }}
 
       - name: Check out current base
-        if: steps.select.outputs.prepare == 'true' || steps.publication.outputs.complete == 'true'
+        if: steps.select.outputs.prepare == 'true' || (inputs.phase == 'all' && steps.publication.outputs.complete == 'true')
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
         with:
           ref: ${{ inputs.base }}
@@ -488,14 +729,14 @@ jobs:
           persist-credentials: false
 
       - name: Install preparation trellis
-        if: steps.select.outputs.prepare == 'true' || steps.publication.outputs.complete == 'true'
+        if: steps.select.outputs.prepare == 'true' || (inputs.phase == 'all' && steps.publication.outputs.complete == 'true')
         uses: tylerbutler/actions/setup-trellis@9d2a7c45ab9c7e04a3ac35445f187840f126ac47 # ratchet:tylerbutler/actions/setup-trellis@main
         with:
           version: ${{ inputs.trellis_version }}
 
       - name: Gate and reserve preparation
         id: gate
-        if: steps.select.outputs.prepare == 'true' || steps.publication.outputs.complete == 'true'
+        if: steps.select.outputs.prepare == 'true' || (inputs.phase == 'all' && steps.publication.outputs.complete == 'true')
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # ratchet:actions/github-script@v9
         env:
           PREPARATION_TOKEN: ${{ steps.app.outputs.token }}
