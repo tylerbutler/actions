@@ -55,6 +55,10 @@ on:
         description: hex, git_only, or mixed
         required: true
         type: string
+      adopt_legacy_tags:
+        description: Adopt ancestor repository series tags that predate the version manifest (requires Trellis 1.7.0)
+        type: boolean
+        default: false
       pre:
         type: string
         default: ''
@@ -609,6 +613,7 @@ jobs:
         shell: bash
         working-directory: ${{ inputs.working_directory }}
         env:
+          ADOPT_LEGACY_TAGS: ${{ inputs.adopt_legacy_tags }}
           GH_TOKEN: ${{ secrets.publication_token || github.token }}
           GITHUB_TOKEN: ${{ secrets.publication_token || github.token }}
           GIT_CONFIG_COUNT: '2'
@@ -616,7 +621,12 @@ jobs:
           GIT_CONFIG_VALUE_0: ''
           GIT_CONFIG_KEY_1: http.${{ steps.reserve.outputs.git_origin }}.extraheader
           GIT_CONFIG_VALUE_1: ${{ steps.reserve.outputs.git_header }}
-        run: trellis tag create --push --github-release
+        run: |
+          args=(tag create --push --github-release)
+          if [[ "$ADOPT_LEGACY_TAGS" == true ]]; then
+            args+=(--force=adopt)
+          fi
+          trellis "${args[@]}"
 
       - name: Reconcile GitHub Release SBOM
         id: release_sbom

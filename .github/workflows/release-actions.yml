@@ -1,0 +1,25 @@
+name: Release actions
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [closed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+  statuses: write
+
+jobs:
+  release:
+    uses: ./.github/workflows/trellis-release.yml
+    with:
+      trellis_version: '1.7.0'
+      release_mode: git_only
+      adopt_legacy_tags: true
+    secrets:
+      app_id: ${{ secrets.RELEASE_APP_ID }}
+      app_private_key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}

@@ -223,7 +223,31 @@ exclude = ["packages/my_lib_experimental"]
 
 ## Versioning
 
-This repo has no release process. Consumers pin to `@main`. There are no version tags.
+All actions and reusable workflows share `release.toml` as the version source.
+`trellis.toml` uses Trellis's manifest adapter and `git_only` lifecycle; no registry
+publication runs. `.mise.toml` pins Trellis 1.7.0.
+
+Consumers can use floating major/minor refs (`@v1`, `@v1.0`), immutable exact refs
+(`@v1.0.0`), a full commit SHA, or unreleased `@main`. The existing historical `v1`
+remains unchanged until the first approved managed release. The unpublished
+`0.0.0` baseline plus the Initial Release fragment plans `1.0.0`.
+
+Add TOML fragments under `.changes/unreleased/` for user-facing changes only:
+`mise exec -- trellis changelog new --package actions --kind Fixed --body "..."`.
+Documentation-only and development-only changes need no entry. Missing fragments
+warn; invalid fragments fail. Let Trellis update versions and generated changelogs.
+
+`.github/workflows/release-actions.yml` calls the existing Trellis coordinator.
+Main pushes prepare `release/pending`; merging that release PR approves exact
+tags, moving series aliases, and GitHub Release notes. Preparation requires
+`RELEASE_APP_ID` and `RELEASE_APP_PRIVATE_KEY` with repository Contents, Pull
+requests, and Commit statuses read/write. Recovery reruns all jobs of the original
+merged release-PR run, not a dispatch from newer main.
+
+The caller enables `adopt_legacy_tags` for native `--force=adopt` migration of the
+manifest-less historical `v1`. It retains Trellis's other guards and can be
+disabled after the first managed release. Do not move remote tags or run a real
+release during configuration work.
 
 ## Internal conventions
 
